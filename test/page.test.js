@@ -134,6 +134,7 @@ test('served page script keeps the token in memory and sends it only as Authoriz
     const status = stubElement();
     const inbox = stubElement();
     const reloadSessions = stubElement();
+    const retryReads = stubElement();
     const sessionList = stubElement();
     const sessionDetail = stubElement();
     const sandbox = {
@@ -146,6 +147,7 @@ test('served page script keeps the token in memory and sends it only as Authoriz
             status,
             inbox,
             'reload-sessions': reloadSessions,
+            'retry-reads': retryReads,
             'session-list': sessionList,
             'session-detail': sessionDetail,
           }[id] || null),
@@ -215,6 +217,8 @@ function stubElement() {
     listeners: {},
     addEventListener(type, fn) { this.listeners[type] = fn; },
     textContent: '', value: '', hidden: false, className: '',
+    tabIndex: 0,
+    setAttribute() {},
     appendChild() {},
   };
 }

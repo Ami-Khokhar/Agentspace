@@ -82,3 +82,22 @@ Consequence: the launcher passes `secret` to the first-party client out of
 band (it must never appear in a URL, a command line or a log). Until a real
 agent adapter exists, callers may only treat a receipt as "the local service
 has the input", never as agent acknowledgement.
+
+## 2026-10-08: Honest read states and labelled keyboard rows on the read-only page (issue #20)
+
+Context: the read-only page needed loading/read-error states, basic
+accessibility and narrow-screen layout without expanding scope or privacy.
+
+Decision: every read (sessions list, session state, pending questions) starts
+from a cleared panel with an explicit loading line; a failure clears and
+labels only the read's own panel ("could not load …", "pending questions
+unavailable"), never reuses content from another session or an earlier state,
+and recovery is by reselect or the "Retry latest read" button. Session and
+question rows are `role="button"` controls with an explicit `aria-label`,
+`tabindex="0"` and Enter/Space activation; focus visibility and narrow-screen
+sizes live in the page's own stylesheet. The README separates `npm test`
+evidence from browser checks that were not performed.
+
+Consequence: the page stays in-memory and first-party (no storage, no remote
+assets, no analytics); future panels on the page must follow the same
+per-read clearing/label/retry pattern instead of caching content.

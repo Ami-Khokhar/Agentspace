@@ -18,6 +18,20 @@ const PAGE_HTML = `<!doctype html>
 <meta charset="utf-8">
 <title>Agentspace (local)</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body { font-family: system-ui, sans-serif; margin: 1rem; max-width: 60rem; }
+#session-list > div, #question-list > div { padding: 0.4rem 0.5rem; }
+.row { border: 1px solid #bbb; border-radius: 4px; margin: 0.25rem 0; cursor: pointer; }
+:focus-visible { outline: 3px solid #0a66c2; outline-offset: 2px; }
+.row.selected { border-color: #0a66c2; background: #eef5fc; }
+#retry-reads { margin: 0.25rem 0 0.75rem; }
+label { display: block; margin-bottom: 0.25rem; }
+button { font: inherit; padding: 0.35rem 0.8rem; min-height: 44px; }
+@media (max-width: 600px) {
+  body { margin: 0.5rem; }
+  #session-list > div, #question-list > div { padding: 0.75rem 0.5rem; }
+}
+</style>
 </head>
 <body>
 <h1>Agentspace</h1>
@@ -33,6 +47,7 @@ const PAGE_HTML = `<!doctype html>
   <div id="session-list"></div>
   <h2>Selected session</h2>
   <div id="session-detail"></div>
+  <button id="retry-reads" type="button">Retry latest read</button>
   <h2>Pending questions</h2>
   <div id="question-list"></div>
   <h2>Selected question</h2>
@@ -75,16 +90,30 @@ const PAGE_JS = `'use strict';
   }
 
   function loadSessions() {
+    // Label the wait and hold the reload control while the read is in
+    // flight; only honest states, never leftover list content.
+    el('reload-sessions').disabled = true;
+    var list = el('session-list');
+    list.textContent = '';
+    line(list, 'loading sessions…');
     return fetch('/sessions', authHeaders())
       .then(function (response) {
         if (!response.ok) throw new Error('status-' + response.status);
         return response.json();
       })
       .then(function (body) {
+        if (!body || !Array.isArray(body.sessions)) throw new Error('unexpected response');
         sessions = body.sessions;
         el('status').textContent = 'connected';
         renderSessionList();
-      });
+      })
+      .catch(function (err) {
+        sessions = [];
+        el('status').textContent = 'could not load sessions (' + err.message + ')';
+        list.textContent = '';
+        line(list, 'could not load sessions (' + err.message + ')');
+      })
+      .then(function () { el('reload-sessions').disabled = false; });
   }
 
   function renderSessionList() {
@@ -92,9 +121,19 @@ const PAGE_JS = `'use strict';
     list.textContent = '';
     sessions.forEach(function (session) {
       var row = document.createElement('div');
-      row.className = selectedSessionId === session.sessionId ? 'selected' : '';
+      row.className = 'row' + (selectedSessionId === session.sessionId ? ' selected' : '');
       // The id and the explicit status from the API are inert text here.
       line(row, session.sessionId + ' — status: ' + session.status);
+      row.tabIndex = 0;
+      row.setAttribute('role', 'button');
+      row.setAttribute('aria-label', 'Open session ' + session.sessionId + ', status ' + session.status);
+      // Keyboard access matches pointer access (activation via click).
+      row.addEventListener('keydown', function (event) {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          selectSession(session.sessionId);
+        }
+      });
       row.addEventListener('click', function () { selectSession(session.sessionId); });
       list.appendChild(row);
     });
@@ -112,8 +151,17 @@ const PAGE_JS = `'use strict';
     var listGeneration = questionGeneration;
     questions.forEach(function (question) {
       var row = document.createElement('div');
-      row.className = selectedQuestionId === question.questionId ? 'selected' : '';
+      row.className = 'row' + (selectedQuestionId === question.questionId ? ' selected' : '');
       line(row, 'question: ' + question.questionId + ' — revision ' + question.revision);
+      row.tabIndex = 0;
+      row.setAttribute('role', 'button');
+      row.setAttribute('aria-label', 'Open question ' + question.questionId + ' of session ' + question.sessionId);
+      row.addEventListener('keydown', function (event) {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          selectQuestion(listGeneration, question);
+        }
+      });
       row.addEventListener('click', function () { selectQuestion(listGeneration, question); });
       list.appendChild(row);
     });
@@ -134,6 +182,16 @@ const PAGE_JS = `'use strict';
     line(detail, 'session: ' + question.sessionId);
     line(detail, 'revision: ' + question.revision);
     line(detail, 'text: ' + question.text);
+  }
+
+  /**
+   * Retry the reads of the current view (the selected session's state and
+   * pending questions, or the session list): recovery from a failed read
+   * without inventing content.
+   */
+  function retryReads() {
+    if (selectedSessionId) selectSession(selectedSessionId);
+    else loadSessions();
   }
 
   function selectSession(sessionId) {
@@ -185,6 +243,12 @@ const PAGE_JS = `'use strict';
         if (gen !== selectionGeneration || selectedSessionId !== sessionId) return;
         detail.textContent = '';
         line(detail, 'could not load ' + sessionId + ' (' + err.message + ')');
+        line(detail, 'use "Retry latest read" to retry');
+        // The pending-questions read depends on this one: keep its panel
+        // labelled as unavailable rather than showing stale content.
+        var questionsList = el('question-list');
+        questionsList.textContent = '';
+        line(questionsList, 'pending questions unavailable: the session read failed');
       });
   }
 
@@ -202,10 +266,9 @@ const PAGE_JS = `'use strict';
     event.preventDefault();
     token = el('token').value;
     el('inbox').hidden = false;
-    el('reload-sessions').addEventListener('click', function () {
-      loadSessions().catch(function () { el('status').textContent = 'could not reload sessions'; });
-    });
-    loadSessions().catch(function () { el('status').textContent = 'token rejected'; });
+    el('reload-sessions').addEventListener('click', function () { loadSessions(); });
+    el('retry-reads').addEventListener('click', function () { retryReads(); });
+    loadSessions();
   }
 
   el('signin').addEventListener('submit', connect);
