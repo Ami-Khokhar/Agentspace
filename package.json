@@ -4,6 +4,7 @@
   "private": true,
   "description": "Local-first prototype: session/question state with explicit reply routing",
   "scripts": {
+    "start": "node src/launcher.js",
     "test": "node --test test/*.test.js"
   }
 }

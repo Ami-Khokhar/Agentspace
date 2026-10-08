@@ -5,7 +5,9 @@
  *
  * Binds to the loopback interface only (no host option is offered), requires
  * a per-launch bearer secret on every request, and rejects cross-origin or
- * non-loopback Host requests from browsers. No CORS headers are ever sent,
+ * non-loopback Host requests from browsers. It also serves two fixed
+ * first-party page assets (`/` and `/app.js`) so a local browser can bootstrap
+ * without credentials in a URL. No CORS headers are ever sent,
  * no subprocess is spawned, no file system or network access is exposed, and
  * the secret never appears in a URL or a log line.
  */
@@ -13,6 +15,17 @@
 const http = require('node:http');
 const crypto = require('node:crypto');
 const { createAgentSpace, AgentSpaceError } = require('./agentspace');
+const { PAGE_HTML, PAGE_JS } = require('./page');
+
+/**
+ * Fixed first-party page assets. They carry no data, so they are served
+ * without the bearer token (a browser opening the page cannot send one yet);
+ * serves exact literals only, so no file-system read or dynamic path can arise.
+ */
+const STATIC_ASSETS = [
+  { pattern: /^\/$/, type: 'text/html; charset=utf-8', body: PAGE_HTML },
+  { pattern: /^\/app\.js$/, type: 'text/javascript; charset=utf-8', body: PAGE_JS },
+];
 
 const MAX_BODY_BYTES = 64 * 1024;
 const ALLOWED_ERROR_STATUS = {
@@ -68,15 +81,21 @@ function createServer({ space = createAgentSpace(), port = 0, secret = crypto.ra
     if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n');
   });
 
-  function send(res, status, body) {
-    const json = JSON.stringify(body);
+  function send(res, status, body, type = 'application/json; charset=utf-8') {
+    // Asset bodies arrive as pre-encoded text; JSON bodies are objects. It must
+    // not double-encode strings into a quoted JSON document.
+    const encoded = typeof body === 'string' ? body : JSON.stringify(body);
     // Deliberately no Access-Control-Allow-* headers: no cross-origin use.
     res.writeHead(status, {
-      'content-type': 'application/json; charset=utf-8',
-      'content-length': Buffer.byteLength(json),
+      'content-type': type,
+      'content-length': Buffer.byteLength(encoded),
       'cache-control': 'no-store',
     });
-    res.end(json);
+    res.end(encoded);
+  }
+
+  function sendAsset(res, asset) {
+    send(res, 200, asset.body, asset.type);
   }
 
 
@@ -226,12 +245,34 @@ function createServer({ space = createAgentSpace(), port = 0, secret = crypto.ra
       send(res, 405, { error: 'badMethod', message: 'only GET and POST are supported' });
       return;
     }
+    // Traversal-like paths are rejected on the raw path: there are no local
+    // files to traverse to and no resource mentions dots or escapes.
+    const rawPath = req.url.split('?')[0];
+    if (/\/\.\.?($|\/)|%2e|%2f|%5c|%00|\\/i.test(rawPath)) {
+      send(res, 400, { error: 'badPath', message: 'request path is not a local resource' });
+      return;
+    }
+    let path;
+    try {
+      path = new URL(req.url, 'http://127.0.0.1').pathname;
+    } catch {
+      send(res, 400, { error: 'badPath', message: 'request path is not a local resource' });
+      return;
+    }
+    // Fixed page assets before the bearer check: the page is the bootstrap,
+    // contains no data, and must open in the browser without a token.
+    if (req.method === 'GET') {
+      const asset = STATIC_ASSETS.find((a) => a.pattern.test(path));
+      if (asset) {
+        sendAsset(res, asset);
+        return;
+      }
+    }
     if (!bearer(req)) {
       res.setHeader('www-authenticate', 'Bearer realm="agentspace-local"');
       send(res, 401, { error: 'unauthorized', message: 'missing or invalid bearer token' });
       return;
     }
-    const path = new URL(req.url, `http://127.0.0.1`).pathname;
     const route = routes.find((r) => r.method === req.method && r.pattern.test(path));
     if (!route) {
       send(res, 404, { error: 'notFound', message: 'no such route' });
