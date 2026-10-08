@@ -11,9 +11,11 @@
  * (never another session's), and selecting a question shows its exact
  * identity and text, and offers a reply composer. Submitting captures the
  * question's session/question/revision and the typed text in one moment, so a
- * later selection change cannot redirect an in-flight reply; only one reply
- * may be in flight, and a 202 receipt is worded as acceptance for routing,
- * never as agent acknowledgement.
+ * later selection change cannot redirect an in-flight reply; each
+ * composer allows at most one reply in flight (a second submit from the same
+ * button makes no second request and says why), and a hung reply can never
+ * refuse replies elsewhere on the page. A 202 receipt is worded as acceptance
+ * for routing, never as agent acknowledgement.
  */
 
 const PAGE_HTML = `<!doctype html>
@@ -80,11 +82,9 @@ const PAGE_JS = `'use strict';
   // The question object whose composer is on screen; null after a session
   // switch. Submission snapshots it, so in-flight replies keep their target.
   var selectedQuestion = null;
-  // While a reply fetch is in flight further submits do nothing.
-  var replyPending = false;
-  // The latest sessions-list failure, or null. A failure clears the list to
-  // sessions = [], and no later successful read of something else (a session
-  // selection) may re-render that empty array and wipe the honest label.
+  // Each composer guards its own submission; there is no page-global pending
+  // flag, so a reply that never settles can never refuse every later reply
+  // elsewhere on the page.
   var listError = null;
 
   function el(id) { return document.getElementById(id); }
@@ -221,30 +221,47 @@ const PAGE_JS = `'use strict';
     statusLine.setAttribute('role', 'status');
     detail.appendChild(sendButton);
     detail.appendChild(statusLine);
+    // Submitting is per composer: at most one in flight from this button, so
+    // a second submit makes no second request. Other composers elsewhere are
+    // never blocked by this one.
+    var replyBusy = false;
     sendButton.addEventListener('click', function () {
-      submitReply(question, textArea, sendButton, statusLine);
+      if (replyBusy) {
+        statusLine.textContent = 'a reply is already being sent for this question';
+        return;
+      }
+      replyBusy = true;
+      // Everything the request needs — target and text — is captured here,
+      // before any await, so selection changes while the request is in
+      // flight cannot change where it goes or what it says.
+      sendReply(question, textArea, sendButton, statusLine).then(function () {
+        replyBusy = false;
+      });
     });
   }
 
   /**
-   * Submit one reply. Everything the request needs — target and text — is
-   * captured here, before any await, so selection changes while the request
-   * is in flight cannot change where it goes or what it says.
+   * Submit one reply. Validation runs before any request and names the
+   * problem; the returned promise always settles, so the composer can never
+   * stay locked. A hung fetch may keep this one composer busy, but nothing
+   * else on the page is refused.
    */
-  function submitReply(question, textArea, sendButton, statusLine) {
+  function sendReply(question, textArea, sendButton, statusLine) {
+    var settle;
+    var settled = new Promise(function (resolve) { settle = resolve; });
     var text = typeof textArea.value === 'string' ? textArea.value.trim() : '';
     // Reject before any request: an incomplete target or empty text must not
     // reach the service.
     if (!question || !question.sessionId || !question.questionId || question.revision === undefined) {
       statusLine.textContent = 'reply not sent: the question has no complete target (session, question, revision)';
-      return;
+      settle();
+      return settled;
     }
     if (text === '') {
       statusLine.textContent = 'reply not sent: type reply text first';
-      return;
+      settle();
+      return settled;
     }
-    if (replyPending) return; // a second pending click makes no second request
-    replyPending = true;
     sendButton.disabled = true;
     var revision = question.revision;
     var url = '/sessions/' + encodeURIComponent(question.sessionId) +
@@ -260,14 +277,16 @@ const PAGE_JS = `'use strict';
         // acknowledgement: no agent receives input in this build.
         if (response.status !== 202) throw new Error('status-' + response.status);
         statusLine.textContent = 'reply accepted for routing';
+        settle();
       })
       .catch(function (err) {
         statusLine.textContent = 'reply not accepted (' + err.message + ')';
       })
       .then(function () {
-        replyPending = false;
         sendButton.disabled = false;
+        settle();
       });
+    return settled;
   }
 
   /**

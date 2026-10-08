@@ -17,6 +17,7 @@ class FakeElement {
     this.children = [];
     this.className = '';
     this.hidden = false;
+    this.disabled = false;
     this.textContent = '';
     this.listeners = {};
   }
@@ -691,7 +692,7 @@ test('a second submit while a reply is pending makes no second request', async (
   await flush();
   await selectLoadedQuestion(app, 'session-1', { sessionId: 'session-1', questionId: 'question-1', revision: 1, text: 'ready?' });
   app.selectQuestion('question-1');
-  const { textArea, sendButton } = composerOf(app);
+  const { textArea, sendButton, statusLine } = composerOf(app);
   textArea.value = 'first';
   sendButton.trigger('click', {});
   await flush();
@@ -701,6 +702,7 @@ test('a second submit while a reply is pending makes no second request', async (
   sendButton.trigger('click', {}); // duplicate click while still pending
   await flush();
   assert.equal(replyCount(app), 1, 'the pending submit cannot generate a second request');
+  assert.match(statusLine.textContent, /already being sent/, 'the blocked duplicate click says why, instead of silently doing nothing');
   const sent = JSON.parse(app.fetches.find((f) => /\/reply$/.test(f.url)).options.body);
   assert.equal(sent.text, 'first', 'the edited text never became a second request');
   assert.equal(sendButton.disabled, true);
@@ -770,4 +772,55 @@ test('incomplete or blank replies send nothing and name the problem', async () =
   await flush();
   assert.equal(replyCount(app), 0, 'no reply is sent for blank text');
   assert.match(composer.statusLine.textContent, /reply not sent: type reply text first/);
+});
+
+test('a held pending reply never blocks a fresh composer after a session switch', async () => {
+  const app = runApp();
+  app.connect();
+  app.pending[0].resolveJson({
+    sessions: [
+      { sessionId: 'session-1', status: 'needs-user', hasPendingQuestion: true },
+      { sessionId: 'session-2', status: 'needs-user', hasPendingQuestion: true },
+    ],
+  });
+  await flush();
+  await selectLoadedQuestion(app, 'session-1', { sessionId: 'session-1', questionId: 'question-1', revision: 3, text: 'go?' });
+  app.selectQuestion('question-1');
+  const first = composerOf(app);
+  first.textArea.value = 'for one';
+  first.sendButton.trigger('click', {});
+  await flush();
+  // Hold the reply fetch: the browser never receives an answer for it.
+  const heldReply = app.pending.findLast((p) => /\/reply$/.test(p.entry.url));
+  assert.equal(heldReply.entry.url, '/sessions/session-1/questions/question-1/reply');
+
+  // The old regression: a page-global pending flag made every later submit a
+  // silent no-op. Instead the selection switches and the fresh composer works.
+  app.select('session-2');
+  app.pending.findLast((p) => p.entry.url === '/sessions/session-2')
+    .resolveJson({ sessionId: 'session-2', status: 'needs-user', activeQuestion: null });
+  await flush();
+  app.pending.findLast((p) => p.entry.url === '/sessions/session-2/questions/pending')
+    .resolveJson({ questions: [{ sessionId: 'session-2', questionId: 'question-2', revision: 5, text: 'and me?' }] });
+  await flush();
+  app.selectQuestion('question-2');
+  const second = composerOf(app);
+  assert.notEqual(second.sendButton, first.sendButton, 'the fresh selection has its own composer');
+  assert.equal(second.sendButton.disabled, false, 'the new composer is not held by the in-flight reply elsewhere');
+  second.textArea.value = 'for two';
+  second.sendButton.trigger('click', {});
+  await flush();
+
+  const replies = app.fetches.filter((f) => /\/reply$/.test(f.url));
+  assert.equal(replies.length, 2, 'the second composer sends its own request; nothing swallowed it');
+  assert.equal(replies[1].url, '/sessions/session-2/questions/question-2/reply');
+  assert.deepEqual(JSON.parse(replies[1].options.body), { revision: 5, text: 'for two' }, 'target and text are captured from the new composer');
+  assert.match(second.statusLine.textContent, /sending reply/);
+
+  // Settle the long-hung reply: its own composer unlocks, and it never
+  // influenced the other one.
+  heldReply.resolveRaw({ status: 202 });
+  await flush();
+  assert.equal(first.sendButton.disabled, false, 'the first composer unlocks when its own reply settles');
+  assert.equal(second.sendButton.disabled, true, 'the second reply is unaffected');
 });

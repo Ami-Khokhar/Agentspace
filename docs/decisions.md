@@ -126,9 +126,12 @@ without a 202 receipt implying the agent received anything.
 Decision: on submit, `src/page.js` snapshots the selected question's
 sessionId/questionId/revision and the typed text in one synchronous step and
 builds the request path and body from that snapshot only, so later selection
-changes cannot redirect or rewrite an in-flight reply. Only one reply may be
-in flight: while pending the button is disabled and further submits make no
-second request. Invalid input (incomplete target, missing revision, blank
+changes cannot redirect or rewrite an in-flight reply. Submitting is
+per composer: while pending that composer's button is disabled and further
+submits from it make no second request (a blocked click names itself); there
+is no page-global pending flag, so a hung or pending reply can never refuse
+replies elsewhere on the page. Invalid input (incomplete target, missing
+revision, blank
 text) is rejected before any fetch with an explicit "reply not sent (…)"
 status line. A `202` is reported as "reply accepted for routing"; the page
 never claims delivery or agent acknowledgement, matching the server's

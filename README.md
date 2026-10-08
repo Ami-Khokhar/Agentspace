@@ -105,7 +105,10 @@ After a successful token sign-in, the page's `app.js` shows a read-only inbox:
   (session, question, revision) and the typed text are captured at submission,
   so changing the selection while the request is in flight cannot redirect or
   rewrite it. While a reply is pending the button is disabled — a second
-  submit makes no second request. An incomplete target, a missing revision or
+  submit makes no second request and names itself ("a reply is already being
+  sent for this question"). Submitting is per composer, not page-global: a
+  hung or still-pending reply never refuses replies from other questions.
+  An incomplete target, a missing revision or
   blank text sends nothing and says so; a `202` receipt is reported as
   "reply accepted for routing" only — no delivery or agent acknowledgement
   is ever claimed, because no agent exists yet. A failure is labelled and
