@@ -1,5 +1,30 @@
 # Decisions
 
+## 2026-10-08: Session-scoped pending questions with question identity (issue #19)
+
+Context: after selecting a session, the operator needs that session's pending
+questions and the exact identity of a chosen question, without any reply path
+and without another session's text ever appearing as current.
+
+Decision: when a session selection's state read succeeds, `src/page.js` also
+reads `GET /sessions/:sessionId/questions/pending` under the same
+selection-generation guard and renders the list; an empty list shows an
+explicit "has no pending questions" line, never a reused previous session's
+rows. Clicking a question shows its exact identity (question id, session id,
+revision, text). A per-render question generation makes rows of earlier
+pending lists inert: a stale row can never display another session's
+question. Everything stays `textContent`-rendered, and the page remains
+read-only (no reply or reply-context requests exist).
+
+Each read also handles its own failure: the pending-questions read carries its
+own catch, so a failure there clears and labels only the pending panel, and
+can never erase or misreport the session state that already rendered
+successfully. The session state read's catch affects only the session panel.
+
+Consequence: delayed reads of either kind, clicked in any order, and failures
+of either read can only affect their own selection and their own panel. The
+composer stays a later issue.
+
 ## 2026-10-08: Read-only inbox with selection generation (issue #18)
 
 Context: the local page must show sessions without retaining unrelated content

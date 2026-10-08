@@ -7,7 +7,9 @@
  * own API. It then shows a read-only inbox: the session list with explicit
  * statuses, and selecting a session shows its state. Everything on the page
  * is rendered with textContent, so session/question text can never become
- * markup. There are no reply controls and no questions panel.
+ * markup. Selecting a session also lists that session's pending questions
+ * (never another session's), and selecting a question shows its exact
+ * identity and text. There are no reply controls.
  */
 
 const PAGE_HTML = `<!doctype html>
@@ -31,6 +33,10 @@ const PAGE_HTML = `<!doctype html>
   <div id="session-list"></div>
   <h2>Selected session</h2>
   <div id="session-detail"></div>
+  <h2>Pending questions</h2>
+  <div id="question-list"></div>
+  <h2>Selected question</h2>
+  <div id="question-detail"></div>
 </section>
 <script src="/app.js"></script>
 </body>
@@ -48,6 +54,10 @@ const PAGE_JS = `'use strict';
   // selection (a late or reordered fetch) carries a stale counter and is
   // discarded, so it can never replace the currently selected content.
   var selectionGeneration = 0;
+  var selectedQuestionId = null;
+  // The same isolation for question rows: switching sessions bumps this, so
+  // controls from a previous pending list can never act on the new state.
+  var questionGeneration = 0;
 
   function el(id) { return document.getElementById(id); }
 
@@ -90,16 +100,58 @@ const PAGE_JS = `'use strict';
     });
   }
 
+  function renderQuestionList(questions) {
+    var list = el('question-list');
+    list.textContent = '';
+    // Empty pending lists are explicit, and never reuse the previous
+    // session's questions (clearing above already guarantees that).
+    if (questions.length === 0) {
+      line(list, selectedSessionId + ' has no pending questions');
+      return;
+    }
+    var listGeneration = questionGeneration;
+    questions.forEach(function (question) {
+      var row = document.createElement('div');
+      row.className = selectedQuestionId === question.questionId ? 'selected' : '';
+      line(row, 'question: ' + question.questionId + ' — revision ' + question.revision);
+      row.addEventListener('click', function () { selectQuestion(listGeneration, question); });
+      list.appendChild(row);
+    });
+  }
+
+  /**
+   * Show one question's exact identity: session, question id, revision and
+   * text — plain textContent only, no reply control.
+   */
+  function selectQuestion(listGeneration, question) {
+    // A row from an abandoned list (session switched since, or a later list
+    // rendered) is inert: it can never display another session's question.
+    if (listGeneration !== questionGeneration || question.sessionId !== selectedSessionId) return;
+    selectedQuestionId = question.questionId;
+    var detail = el('question-detail');
+    detail.textContent = '';
+    line(detail, 'question: ' + question.questionId);
+    line(detail, 'session: ' + question.sessionId);
+    line(detail, 'revision: ' + question.revision);
+    line(detail, 'text: ' + question.text);
+  }
+
   function selectSession(sessionId) {
     selectionGeneration += 1;
+    questionGeneration += 1; // stale question rows become inert immediately
     var gen = selectionGeneration;
     selectedSessionId = sessionId;
+    selectedQuestionId = null;
     var detail = el('session-detail');
     // Clear immediately and synchronously: switching away must never leave
     // the previous session's content on screen, even before the replacement
     // read arrives.
     detail.textContent = '';
     line(detail, 'loading ' + sessionId + '…');
+    var questionsList = el('question-list');
+    questionsList.textContent = '';
+    line(questionsList, 'loading pending questions…');
+    el('question-detail').textContent = '';
     fetch('/sessions/' + encodeURIComponent(sessionId), authHeaders())
       .then(function (response) {
         if (!response.ok) throw new Error('status-' + response.status);
@@ -109,6 +161,25 @@ const PAGE_JS = `'use strict';
         if (gen !== selectionGeneration || selectedSessionId !== sessionId) return;
         renderSession(state);
         renderSessionList();
+        // Pending questions are read under the same generation, so any
+        // response for an earlier selection is discarded, not rendered.
+        return fetch('/sessions/' + encodeURIComponent(sessionId) + '/questions/pending', authHeaders())
+          .then(function (response) {
+            if (!response.ok) throw new Error('status-' + response.status);
+            return response.json();
+          })
+          .then(function (pending) {
+            if (gen !== selectionGeneration || selectedSessionId !== sessionId) return;
+            renderQuestionList(pending.questions);
+          })
+          .catch(function (err) {
+            // Only the pending read's own panel is affected: a failure here
+            // must not erase or mislabel the session state, which may have
+            // rendered correctly already.
+            if (gen !== selectionGeneration || selectedSessionId !== sessionId) return;
+            questionsList.textContent = '';
+            line(questionsList, 'could not load pending questions (' + err.message + ')');
+          });
       })
       .catch(function (err) {
         if (gen !== selectionGeneration || selectedSessionId !== sessionId) return;

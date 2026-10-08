@@ -55,7 +55,7 @@ class FakeElement {
 
 function runApp() {
   const elements = {};
-  const ids = ['signin', 'token', 'status', 'inbox', 'reload-sessions', 'session-list', 'session-detail'];
+  const ids = ['signin', 'token', 'status', 'inbox', 'reload-sessions', 'session-list', 'session-detail', 'question-list', 'question-detail'];
   for (const id of ids) elements[id] = new FakeElement('div');
   const document = {
     getElementById: (id) => elements[id] || null,
@@ -89,6 +89,13 @@ function runApp() {
         child.children.some((line) => line.textContent.startsWith(id + ' '))
       );
       assert.ok(row, `session list has a row for ${id}`);
+      row.trigger('click', {});
+    },
+    selectQuestion(id) {
+      const row = elements['question-list'].children.find((child) =>
+        child.children.some((line) => line.textContent.startsWith('question: ' + id + ' '))
+      );
+      assert.ok(row, `pending question list has a row for ${id}`);
       row.trigger('click', {});
     },
   };
@@ -129,16 +136,165 @@ test('two sessions are listed with explicit statuses and either can be selected'
   assert.match(detail, /session: session-2/);
   assert.match(detail, /status: needs-user/);
   assert.match(detail, /open question: Proceed\? \(revision 2\)/);
+  // The session state read also triggers that session's pending-question read.
+  assert.equal(app.fetches[2].url, '/sessions/session-2/questions/pending', 'selection reads that session’s own pending questions');
+  app.pending[2].resolveJson({ questions: [{ sessionId: 'session-2', questionId: 'question-2', revision: 2, text: 'Proceed?' }] });
+  await flush();
+  assert.match(app.elements['question-list'].textContent, /question: question-2 — revision 2/);
+  assert.ok(!app.elements['question-list'].textContent.includes('session-1'), 'the list is scoped to the selected session');
+
+  // Select a question: the exact identity of that question is shown.
+  app.selectQuestion('question-2');
+  const questionDetail = app.elements['question-detail'].textContent;
+  assert.match(questionDetail, /question: question-2/);
+  assert.match(questionDetail, /session: session-2/);
+  assert.match(questionDetail, /revision: 2/);
+  assert.match(questionDetail, /text: Proceed\?/);
 
   // Now select the other identifier: its own state replaces the panel.
   app.select('session-1');
-  app.pending[2].resolveJson({ sessionId: 'session-1', status: 'working', activeQuestion: null });
+  app.pending[3].resolveJson({ sessionId: 'session-1', status: 'working', activeQuestion: null });
   await flush();
   assert.match(app.elements['session-detail'].textContent, /status: working/);
   assert.match(app.elements['session-detail'].textContent, /no open question/);
   assert.ok(!app.elements['session-detail'].textContent.includes('session-2'), 'previous selection content is gone');
+  assert.ok(!app.elements['question-detail'].textContent.includes('question-2'), 'the question panel is cleared when the session changes');
+  assert.match(app.elements['question-list'].textContent, /loading pending questions/);
   assert.equal(app.elements['session-list'].children[0].className, 'selected', 'the selected row is marked');
   assert.equal(app.elements['session-list'].children[1].className, '', 'the other row is not marked');
+  // Its own pending read shows an explicit empty state, never session-2's list.
+  assert.equal(app.fetches[4].url, '/sessions/session-1/questions/pending');
+  app.pending[4].resolveJson({ questions: [] });
+  await flush();
+  assert.match(app.elements['question-list'].textContent, /session-1 has no pending questions/);
+  assert.ok(!app.elements['question-list'].textContent.includes('question-2', "the previous session's questions are not reused"));
+});
+
+test('a question selection shows its exact identity and never sends a reply request', async () => {
+  const app = runApp();
+  app.connect();
+  app.pending[0].resolveJson({
+    sessions: [
+      { sessionId: 'session-1', status: 'needs-user', hasPendingQuestion: true },
+      { sessionId: 'session-2', status: 'needs-user', hasPendingQuestion: true },
+    ],
+  });
+  await flush();
+
+  // Session-1 has its own question with its own identity.
+  app.select('session-1');
+  app.pending[1].resolveJson({
+    sessionId: 'session-1',
+    status: 'needs-user',
+    activeQuestion: { questionId: 'question-1', revision: 1, text: 'session one question?', status: 'open' },
+  });
+  await flush();
+  app.pending[2].resolveJson({ questions: [{ sessionId: 'session-1', questionId: 'question-1', revision: 1, text: 'session one question?' }] });
+  await flush();
+  app.selectQuestion('question-1');
+  const first = app.elements['question-detail'].textContent;
+  assert.match(first, /question: question-1/);
+  assert.match(first, /session: session-1/);
+  assert.match(first, /revision: 1/);
+  assert.match(first, /text: session one question\?/);
+
+  // The second session's question is never shown under the first selection.
+  app.select('session-2');
+  app.pending[3].resolveJson({
+    sessionId: 'session-2',
+    status: 'needs-user',
+    activeQuestion: { questionId: 'question-2', revision: 2, text: 'session two question?', status: 'open' },
+  });
+  await flush();
+  app.pending[4].resolveJson({ questions: [{ sessionId: 'session-2', questionId: 'question-2', revision: 2, text: 'session two question?' }] });
+  await flush();
+  app.selectQuestion('question-2');
+  const second = app.elements['question-detail'].textContent;
+  assert.match(second, /question: question-2/);
+  assert.match(second, /session: session-2/);
+  assert.match(second, /text: session two question\?/);
+  assert.ok(!second.includes('session one question'), "no other session's question text remains");
+
+  // Read-only: every request is a GET of a read endpoint, never a reply.
+  for (const f of app.fetches) {
+    assert.equal(f.options.method, undefined, `every request is a GET, saw ${f.options.method} ${f.url}`);
+    assert.ok(!/\/reply/.test(f.url), `no reply request is ever made, saw ${f.url}`);
+    assert.ok(/^(\/sessions|\/questions)/.test(f.url), `only service reads are requested, saw ${f.url}`);
+  }
+  assert.equal(app.fetches.length, 5, 'each selection reads exactly its state and its pending questions');
+});
+
+test('delayed reads and stale question controls cannot display a previous session\u0027s questions', async () => {
+  const app = runApp();
+  app.connect();
+  app.pending[0].resolveJson({
+    sessions: [
+      { sessionId: 'session-1', status: 'needs-user', hasPendingQuestion: true },
+      { sessionId: 'session-2', status: 'needs-user', hasPendingQuestion: true },
+    ],
+  });
+  await flush();
+
+  // Load session-1 fully but hold its pending-question read.
+  app.select('session-1');
+  app.pending[1].resolveJson({
+    sessionId: 'session-1',
+    status: 'needs-user',
+    activeQuestion: { questionId: 'question-1', revision: 1, text: 'session one pending?', status: 'open' },
+  });
+  await flush();
+  assert.equal(app.fetches[2].url, '/sessions/session-1/questions/pending');
+  app.pending[2].resolveJson({ questions: [{ sessionId: 'session-1', questionId: 'question-1', revision: 1, text: 'session one pending?' }] });
+  await flush();
+  // Select and verify session-1's question, and keep its row element: after
+  // switching, it becomes a stale control from a previous selection.
+  app.selectQuestion('question-1');
+  assert.match(app.elements['question-detail'].textContent, /session: session-1/);
+  const staleRow = app.elements['question-list'].children.find((child) =>
+    child.children.some((line) => line.textContent.startsWith('question: question-1 '))
+  );
+  assert.ok(staleRow, 'session-1 has a pending question row before the switch');
+
+  // Now switch to session-2 and hold its reads; click the stale control.
+  app.select('session-2');
+  assert.match(app.elements['question-list'].textContent, /loading pending questions/);
+  assert.equal(app.elements['question-detail'].textContent, '', 'the question panel is cleared immediately');
+  staleRow.trigger('click', {}); // stale control from session-1's list
+  assert.ok(!app.elements['question-detail'].textContent.includes('session one pending'), 'a stale question control is inert');
+
+  // Session-2's reads resolve first, out of order relative to session-1's.
+  app.pending[3].resolveJson({
+    sessionId: 'session-2',
+    status: 'needs-user',
+    activeQuestion: { questionId: 'question-2', revision: 2, text: 'session two pending?', status: 'open' },
+  });
+  await flush();
+  assert.equal(app.fetches[4].url, '/sessions/session-2/questions/pending');
+
+  // Start a third selection (back to session-1) while session-2's pending
+  // read is still outstanding, then resolve the OLD reads out of order.
+  app.select('session-1');
+  app.pending[4].resolveJson({ questions: [{ sessionId: 'session-2', questionId: 'question-2', revision: 2, text: 'session two pending?' }] });
+  await flush();
+  const shuffled = app.elements['question-list'].textContent;
+  assert.ok(!shuffled.includes('session two pending'), `late old-selection pending rendered, saw: ${shuffled}`);
+  assert.ok(!app.elements['question-detail'].textContent.includes('session two pending'), 'no discarded pending read drives the question panel');
+  assert.match(shuffled, /loading pending questions/, 'the current selection keeps its own loading state');
+
+  // The current selection completes; the resolved old question-2 read stays
+  // discarded while session-1's questions come back.
+  app.pending[5].resolveJson({ sessionId: 'session-1', status: 'needs-user', activeQuestion: null });
+  await flush();
+  app.pending[6].resolveJson({ questions: [{ sessionId: 'session-1', questionId: 'question-1', revision: 3, text: 'session one pending again?' }] });
+  await flush();
+  const finalList = app.elements['question-list'].textContent;
+  assert.ok(!finalList.includes('session two pending'), `discarded pending read leaked, saw: ${finalList}`);
+  assert.match(finalList, /question: question-1 — revision 3/, "the current session's questions are shown");
+  staleRow.trigger('click', {}); // the old session-1 row from the first load
+  assert.ok(!app.elements['question-detail'].textContent.includes('session one pending?'), 'a stale question control is inert');
+  app.selectQuestion('question-1');
+  assert.match(app.elements['question-detail'].textContent, /session: session-1/);
+  assert.match(app.elements['question-detail'].textContent, /text: session one pending again\?/);
 });
 
 test('switching clears content immediately and a slower earlier read cannot replace it', async () => {
@@ -165,6 +321,9 @@ test('switching clears content immediately and a slower earlier read cannot repl
   app.pending[2].resolveJson({ sessionId: 'session-1', status: 'working', activeQuestion: null });
   await flush();
   assert.match(app.elements['session-detail'].textContent, /session: session-1/);
+  app.pending[3].resolveJson({ questions: [] });
+  await flush();
+  assert.match(app.elements['question-list'].textContent, /session-1 has no pending questions/);
 
   // Release the slower earlier read now — after the newer selection already
   // rendered. Without selection-identity/generation guarding it would paint
@@ -178,6 +337,47 @@ test('switching clears content immediately and a slower earlier read cannot repl
   assert.match(final, /session: session-1/);
   assert.equal(app.elements['session-list'].children[0].className, 'selected', 'selection stays on session-1');
   assert.equal(app.elements['session-list'].children[1].className, '', 'the other row is not marked');
+});
+
+test('a failing pending-questions read leaves the session state intact and labels the right read', async () => {
+  const app = runApp();
+  app.connect();
+  app.pending[0].resolveJson({
+    sessions: [
+      { sessionId: 'session-1', status: 'needs-user', hasPendingQuestion: true },
+      { sessionId: 'session-2', status: 'needs-user', hasPendingQuestion: true },
+    ],
+  });
+  await flush();
+  app.select('session-1');
+  app.pending[1].resolveJson({
+    sessionId: 'session-1',
+    status: 'needs-user',
+    activeQuestion: { questionId: 'question-1', revision: 1, text: 'help?', status: 'open' },
+  });
+  await flush();
+
+  // The pending read fails (bad status). It must not erase the session state
+  // that just rendered, and the error must name the pending read, not the
+  // session which actually loaded.
+  assert.equal(app.fetches[2].url, '/sessions/session-1/questions/pending');
+  app.pending[2].rejectError(new Error('status-500'));
+  await flush();
+  const detail = app.elements['session-detail'].textContent;
+  assert.match(detail, /session: session-1/, `session detail keeps its state, saw: ${detail}`);
+  assert.match(detail, /status: needs-user/);
+  assert.match(detail, /open question: help\?/);
+  assert.ok(!detail.includes('could not load'), `no session-load error is invented, saw: ${detail}`);
+  const list = app.elements['question-list'].textContent;
+  assert.match(list, /could not load pending questions \(status-500\)/);
+  assert.ok(!list.includes('loading pending questions'), 'the loading state is replaced by the error');
+
+  // A failing session state read still reports against that read only.
+  app.select('session-2');
+  app.pending[3].rejectError(new Error('status-401'));
+  await flush();
+  assert.match(app.elements['session-detail'].textContent, /could not load session-2 \(status-401\)/);
+  assert.match(app.elements['question-list'].textContent, /loading pending questions/, 'session failure does not fake a pending failure');
 });
 
 test('session and question text rendered by the script is inert, not markup', async () => {
@@ -197,7 +397,14 @@ test('session and question text rendered by the script is inert, not markup', as
   await flush();
   const detail = app.elements['session-detail'];
   assert.match(detail.textContent, new RegExp(hostileText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'text is shown verbatim');
-  detail.walk((node) => {
+
+  // The selected question's context text is equally inert.
+  app.pending[2].resolveJson({ questions: [{ sessionId: 'session-1', questionId: 'question-1', revision: 1, text: hostileText }] });
+  await flush();
+  app.selectQuestion('question-1');
+  const questionDetail = app.elements['question-detail'];
+  assert.match(questionDetail.textContent, new RegExp(hostileText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'question text is shown verbatim');
+  questionDetail.walk((node) => {
     assert.equal(node.tagName, 'div', 'only plain div elements are created, never parsed markup');
     assert.equal(node.children.length, 0, 'lines carry no child elements');
   });
