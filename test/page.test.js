@@ -132,9 +132,23 @@ test('served page script keeps the token in memory and sends it only as Authoriz
     const signin = stubElement();
     const tokenInput = stubElement();
     const status = stubElement();
+    const inbox = stubElement();
+    const reloadSessions = stubElement();
+    const sessionList = stubElement();
+    const sessionDetail = stubElement();
     const sandbox = {
       document: {
-        getElementById: (id) => ({ signin, token: tokenInput, status }[id] || null),
+        createElement: () => stubElement(),
+        getElementById: (id) =>
+          ({
+            signin,
+            token: tokenInput,
+            status,
+            inbox,
+            'reload-sessions': reloadSessions,
+            'session-list': sessionList,
+            'session-detail': sessionDetail,
+          }[id] || null),
       },
     };
     sandbox.globalThis = sandbox;
@@ -197,7 +211,12 @@ test('launcher keeps the token out of a fake-TTY echo (raw mode, muted output)',
 });
 
 function stubElement() {
-  return { listeners: {}, addEventListener(type, fn) { this.listeners[type] = fn; }, textContent: '', value: '' };
+  return {
+    listeners: {},
+    addEventListener(type, fn) { this.listeners[type] = fn; },
+    textContent: '', value: '', hidden: false, className: '',
+    appendChild() {},
+  };
 }
 
 test('launcher: manual token entry, nothing about the token is printed, page is reachable', async () => {

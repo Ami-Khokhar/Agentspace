@@ -1,5 +1,25 @@
 # Decisions
 
+## 2026-10-08: Read-only inbox with selection generation (issue #18)
+
+Context: the local page must show sessions without retaining unrelated content
+when the operator switches, without rendering session text as markup, and
+still provide no reply path yet.
+
+Decision: `src/page.js` (after sign-in) lists sessions with their explicit API
+statuses, and selection is explicit — clicking a session row reads
+`GET /sessions/:sessionId`. Clicking clears the detail panel synchronously and
+bumps a selection-generation counter; each read response is tagged with the
+generation it was issued under, and any response from an older generation (a
+slower read of a previously selected session) is discarded instead of
+rendered. All dynamic content is inserted via `textContent` into new elements,
+so session/question labels are inert text, never parsed markup.
+
+Consequence: a delayed response can never replace current selection content,
+regardless of response ordering. The page stays read-only: the core's reply
+and event endpoints remain server-side-only until a later issue builds the
+questions panel and composer.
+
 ## 2026-10-08: Explicit events, not text guesses (issue #2)
 
 Context: replies and state changes must be unambiguous, and a wrong guess (for
