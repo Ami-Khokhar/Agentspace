@@ -92,19 +92,33 @@ After a successful token sign-in, the page's `app.js` shows a read-only inbox:
   failing pending-questions read clears and labels only the pending panel,
   leaving the already rendered session state untouched.
 - Pending question rows are selectable: a selected question shows its exact
-  identity — question id, its own session id, revision, and text. Switching
+  identity — question id, its own session id, revision, and text — together
+  with a reply composer (a labelled text field, a "Send reply" button and a
+  status line). Switching
   sessions clears the question panel and makes rows of earlier pending lists
   inert, so a stale control can never display another session's question.
 - All session and question content is rendered with `textContent` into new
   elements; script/markup-like session or question text stays inert text and
-  is never parsed as markup.
+  is never parsed as markup — including reply composer text.
+- A reply is submitted through the composer (`POST
+  /sessions/:sessionId/questions/:questionId/reply`): the exact target
+  (session, question, revision) and the typed text are captured at submission,
+  so changing the selection while the request is in flight cannot redirect or
+  rewrite it. While a reply is pending the button is disabled — a second
+  submit makes no second request. An incomplete target, a missing revision or
+  blank text sends nothing and says so; a `202` receipt is reported as
+  "reply accepted for routing" only — no delivery or agent acknowledgement
+  is ever claimed, because no agent exists yet. A failure is labelled and
+  re-submitting is restored.
 - Accessibility basics: session and pending-question rows are labelled
   controls (`role="button"`, an `aria-label` naming the session/question and
   status, focusable with `tabindex="0"`) that respond to Enter and Space as
   well as click; the sign-in token field has a real `<label>`; the stylesheet
   gives every control a visible `:focus-visible` outline; rows and buttons
   enlarge at `max-width: 600px` so the page stays usable on narrow screens.
-- There are no reply controls: the page is read-only over the API.
+- There is no reply editing beyond one submission at a time: the composer is
+  sent as-is by the button; draft preservation and stale-revision handling are
+  later work.
 
 ## Manual browser checks (not automated evidence)
 

@@ -79,6 +79,9 @@ function runApp() {
       pendingFetches.push({
         entry,
         resolveJson: (body) => resolve({ ok: true, json: async () => body }),
+        // Raw response control, for reply receipts where the status code is
+        // the payload (202 is the only acceptance signal the page looks at).
+        resolveRaw: (response) => resolve(response),
         rejectError: (err) => reject(err),
       });
     });
@@ -611,7 +614,160 @@ test('session and question text rendered by the script is inert, not markup', as
   const questionDetail = app.elements['question-detail'];
   assert.match(questionDetail.textContent, new RegExp(hostileText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'question text is shown verbatim');
   questionDetail.walk((node) => {
-    assert.equal(node.tagName, 'div', 'only plain div elements are created, never parsed markup');
-    assert.equal(node.children.length, 0, 'lines carry no child elements');
+    assert.ok(['div', 'textarea', 'button'].includes(node.tagName), 'only plain div lines plus the composer controls are created, never parsed markup');
+    if (node.tagName === 'div') assert.equal(node.children.length, 0, 'text lines carry no child elements');
   });
+});
+
+function selectLoadedQuestion(app, session, question) {
+  app.select(session);
+  // findLast: if the same read was made before (an earlier composer test
+  // step), the first promise is already settled, so target the newest one.
+  const detail = app.pending.findLast((p) => p.entry.url === '/sessions/' + session);
+  detail.resolveJson({ sessionId: session, status: 'needs-user', activeQuestion: null });
+  return flush().then(() => {
+    const pendingRead = app.pending.findLast((p) => p.entry.url === '/sessions/' + session + '/questions/pending');
+    pendingRead.resolveJson({ questions: Array.isArray(question) ? question : [question] });
+    return flush();
+  });
+}
+
+function composerOf(app) {
+  const detail = app.elements['question-detail'];
+  const textArea = detail.children.find((n) => n.tagName === 'textarea');
+  const sendButton = detail.children.find((n) => n.tagName === 'button');
+  const statusLine = detail.children[detail.children.length - 1];
+  assert.ok(textArea && sendButton && statusLine, 'the composer has a text field, a send button and a status line');
+  return { textArea, sendButton, statusLine };
+}
+
+function replyCount(app) {
+  return app.fetches.filter((f) => /\/reply$/.test(f.url)).length;
+}
+
+test('a submitted reply keeps its captured target when the selection changes', async () => {
+  const app = runApp();
+  app.connect();
+  app.pending[0].resolveJson({
+    sessions: [
+      { sessionId: 'session-1', status: 'needs-user', hasPendingQuestion: true },
+      { sessionId: 'session-2', status: 'needs-user', hasPendingQuestion: true },
+    ],
+  });
+  await flush();
+  await selectLoadedQuestion(app, 'session-1', { sessionId: 'session-1', questionId: 'question-1', revision: 3, text: 'go ahead?' });
+  app.selectQuestion('question-1');
+
+  const { textArea, sendButton, statusLine } = composerOf(app);
+  textArea.value = '  yes, proceed  ';
+  sendButton.trigger('click', {});
+  await flush();
+
+  // The request is built at submission, from the submitted question only.
+  const reply = app.fetches.find((f) => /\/reply$/.test(f.url));
+  assert.equal(reply.url, '/sessions/session-1/questions/question-1/reply', 'the reply names the exact session and question');
+  assert.equal(reply.options.method, 'POST');
+  assert.equal(reply.options.headers.authorization, 'Bearer page-token');
+  assert.deepEqual(JSON.parse(reply.options.body), { revision: 3, text: 'yes, proceed' }, 'revision and text are captured at submission');
+  assert.match(statusLine.textContent, /sending reply/);
+  assert.equal(sendButton.disabled, true, 'the send button is held while the reply is in flight');
+
+  // Switch the selection while the reply is unresolved: the request must not
+  // be redirected to the new selection.
+  app.select('session-2');
+  app.pending.find((p) => p.entry.url === '/sessions/session-2').resolveJson({ sessionId: 'session-2', status: 'needs-user', activeQuestion: null });
+  await flush();
+  const pendingReply = app.pending.find((p) => p.entry.url === '/sessions/session-1/questions/question-1/reply');
+  assert.equal(JSON.parse(pendingReply.entry.options.body).revision, 3, 'the in-flight body still carries the original revision');
+  pendingReply.resolveJson({ ok: true, status: 202, json: async () => ({ accepted: true }) });
+  await flush();
+  assert.equal(replyCount(app), 1, 'exactly one reply was submitted');
+});
+
+test('a second submit while a reply is pending makes no second request', async () => {
+  const app = runApp();
+  app.connect();
+  app.pending[0].resolveJson({ sessions: [{ sessionId: 'session-1', status: 'needs-user', hasPendingQuestion: true }] });
+  await flush();
+  await selectLoadedQuestion(app, 'session-1', { sessionId: 'session-1', questionId: 'question-1', revision: 1, text: 'ready?' });
+  app.selectQuestion('question-1');
+  const { textArea, sendButton } = composerOf(app);
+  textArea.value = 'first';
+  sendButton.trigger('click', {});
+  await flush();
+
+  assert.equal(replyCount(app), 1);
+  textArea.value = 'second';
+  sendButton.trigger('click', {}); // duplicate click while still pending
+  await flush();
+  assert.equal(replyCount(app), 1, 'the pending submit cannot generate a second request');
+  const sent = JSON.parse(app.fetches.find((f) => /\/reply$/.test(f.url)).options.body);
+  assert.equal(sent.text, 'first', 'the edited text never became a second request');
+  assert.equal(sendButton.disabled, true);
+
+  app.pending.find((p) => /\/reply$/.test(p.entry.url)).resolveRaw({ status: 202 });
+  await flush();
+  assert.equal(sendButton.disabled, false, 'submitting is possible again once the reply settles');
+});
+
+test('a 202 receipt is worded as acceptance for routing, never as delivery', async () => {
+  const app = runApp();
+  app.connect();
+  app.pending[0].resolveJson({ sessions: [{ sessionId: 'session-1', status: 'needs-user', hasPendingQuestion: true }] });
+  await flush();
+  await selectLoadedQuestion(app, 'session-1', { sessionId: 'session-1', questionId: 'question-1', revision: 2, text: 'there?' });
+  app.selectQuestion('question-1');
+  const { textArea, sendButton, statusLine } = composerOf(app);
+  textArea.value = 'ack';
+  sendButton.trigger('click', {});
+  await flush();
+  app.pending.find((p) => /\/reply$/.test(p.entry.url)).resolveRaw({ status: 202 });
+  await flush();
+
+  assert.match(statusLine.textContent, /accepted for routing/, 'acceptance is named for what it is');
+  assert.ok(!/deliver|acknowledg/i.test(statusLine.textContent), 'no delivered or acknowledged claim is made');
+});
+
+test('a failed reply is labelled and submitting is restored', async () => {
+  const app = runApp();
+  app.connect();
+  app.pending[0].resolveJson({ sessions: [{ sessionId: 'session-1', status: 'needs-user', hasPendingQuestion: true }] });
+  await flush();
+  await selectLoadedQuestion(app, 'session-1', { sessionId: 'session-1', questionId: 'question-1', revision: 1, text: 'there?' });
+  app.selectQuestion('question-1');
+  const { textArea, sendButton, statusLine } = composerOf(app);
+  textArea.value = 'retry me';
+  sendButton.trigger('click', {});
+  await flush();
+  app.pending.find((p) => /\/reply$/.test(p.entry.url)).rejectError(new Error('status-500'));
+  await flush();
+  assert.match(statusLine.textContent, /reply not accepted \(status-500\)/);
+  assert.equal(sendButton.disabled, false, 'the failure leaves the composer usable');
+});
+
+test('incomplete or blank replies send nothing and name the problem', async () => {
+  const app = runApp();
+  app.connect();
+  app.pending[0].resolveJson({ sessions: [{ sessionId: 'session-1', status: 'needs-user', hasPendingQuestion: true }] });
+  await flush();
+
+  // A question row whose data has no revision cannot be replied to.
+  await selectLoadedQuestion(app, 'session-1', { sessionId: 'session-1', questionId: 'question-9', text: 'revision missing?' });
+  app.selectQuestion('question-9');
+  let composer = composerOf(app);
+  composer.textArea.value = 'wants to answer';
+  composer.sendButton.trigger('click', {});
+  await flush();
+  assert.equal(replyCount(app), 0, 'no reply is sent without a revision');
+  assert.match(composer.statusLine.textContent, /reply not sent: the question has no complete target/);
+
+  // Reload with a real question; blank and whitespace-only text are rejected.
+  await selectLoadedQuestion(app, 'session-1', { sessionId: 'session-1', questionId: 'question-1', revision: 1, text: 'there?' });
+  app.selectQuestion('question-1');
+  composer = composerOf(app);
+  composer.textArea.value = '   ';
+  composer.sendButton.trigger('click', {});
+  await flush();
+  assert.equal(replyCount(app), 0, 'no reply is sent for blank text');
+  assert.match(composer.statusLine.textContent, /reply not sent: type reply text first/);
 });

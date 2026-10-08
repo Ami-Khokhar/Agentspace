@@ -9,7 +9,11 @@
  * is rendered with textContent, so session/question text can never become
  * markup. Selecting a session also lists that session's pending questions
  * (never another session's), and selecting a question shows its exact
- * identity and text. There are no reply controls.
+ * identity and text, and offers a reply composer. Submitting captures the
+ * question's session/question/revision and the typed text in one moment, so a
+ * later selection change cannot redirect an in-flight reply; only one reply
+ * may be in flight, and a 202 receipt is worded as acceptance for routing,
+ * never as agent acknowledgement.
  */
 
 const PAGE_HTML = `<!doctype html>
@@ -73,6 +77,11 @@ const PAGE_JS = `'use strict';
   // The same isolation for question rows: switching sessions bumps this, so
   // controls from a previous pending list can never act on the new state.
   var questionGeneration = 0;
+  // The question object whose composer is on screen; null after a session
+  // switch. Submission snapshots it, so in-flight replies keep their target.
+  var selectedQuestion = null;
+  // While a reply fetch is in flight further submits do nothing.
+  var replyPending = false;
   // The latest sessions-list failure, or null. A failure clears the list to
   // sessions = [], and no later successful read of something else (a session
   // selection) may re-render that empty array and wipe the honest label.
@@ -182,19 +191,83 @@ const PAGE_JS = `'use strict';
 
   /**
    * Show one question's exact identity: session, question id, revision and
-   * text — plain textContent only, no reply control.
+   * text — plain textContent only — plus a reply composer for exactly this
+   * question.
    */
   function selectQuestion(listGeneration, question) {
     // A row from an abandoned list (session switched since, or a later list
     // rendered) is inert: it can never display another session's question.
     if (listGeneration !== questionGeneration || question.sessionId !== selectedSessionId) return;
     selectedQuestionId = question.questionId;
+    selectedQuestion = question;
     var detail = el('question-detail');
     detail.textContent = '';
     line(detail, 'question: ' + question.questionId);
     line(detail, 'session: ' + question.sessionId);
     line(detail, 'revision: ' + question.revision);
     line(detail, 'text: ' + question.text);
+    replyComposer(detail, question);
+  }
+
+  function replyComposer(detail, question) {
+    line(detail, 'reply to this question:');
+    var textArea = document.createElement('textarea');
+    textArea.setAttribute('aria-label', 'Reply text for question ' + question.questionId);
+    detail.appendChild(textArea);
+    var sendButton = document.createElement('button');
+    sendButton.type = 'button';
+    sendButton.textContent = 'Send reply';
+    var statusLine = document.createElement('div');
+    statusLine.setAttribute('role', 'status');
+    detail.appendChild(sendButton);
+    detail.appendChild(statusLine);
+    sendButton.addEventListener('click', function () {
+      submitReply(question, textArea, sendButton, statusLine);
+    });
+  }
+
+  /**
+   * Submit one reply. Everything the request needs — target and text — is
+   * captured here, before any await, so selection changes while the request
+   * is in flight cannot change where it goes or what it says.
+   */
+  function submitReply(question, textArea, sendButton, statusLine) {
+    var text = typeof textArea.value === 'string' ? textArea.value.trim() : '';
+    // Reject before any request: an incomplete target or empty text must not
+    // reach the service.
+    if (!question || !question.sessionId || !question.questionId || question.revision === undefined) {
+      statusLine.textContent = 'reply not sent: the question has no complete target (session, question, revision)';
+      return;
+    }
+    if (text === '') {
+      statusLine.textContent = 'reply not sent: type reply text first';
+      return;
+    }
+    if (replyPending) return; // a second pending click makes no second request
+    replyPending = true;
+    sendButton.disabled = true;
+    var revision = question.revision;
+    var url = '/sessions/' + encodeURIComponent(question.sessionId) +
+      '/questions/' + encodeURIComponent(question.questionId) + '/reply';
+    statusLine.textContent = 'sending reply…';
+    fetch(url, {
+      method: 'POST',
+      headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' },
+      body: JSON.stringify({ revision: revision, text: text }),
+    })
+      .then(function (response) {
+        // Only 202 is acceptance. It never claims delivery or agent
+        // acknowledgement: no agent receives input in this build.
+        if (response.status !== 202) throw new Error('status-' + response.status);
+        statusLine.textContent = 'reply accepted for routing';
+      })
+      .catch(function (err) {
+        statusLine.textContent = 'reply not accepted (' + err.message + ')';
+      })
+      .then(function () {
+        replyPending = false;
+        sendButton.disabled = false;
+      });
   }
 
   /**
@@ -213,6 +286,7 @@ const PAGE_JS = `'use strict';
     var gen = selectionGeneration;
     selectedSessionId = sessionId;
     selectedQuestionId = null;
+    selectedQuestion = null;
     var detail = el('session-detail');
     // Clear immediately and synchronously: switching away must never leave
     // the previous session's content on screen, even before the replacement

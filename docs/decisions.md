@@ -116,3 +116,24 @@ load sessions (…)" label instead of the empty array; only a successful
 
 Consequence: each panel's paired failure label and in-memory state move
 together; a recovery action recovers exactly its own panel's read.
+
+## 2026-10-08: Reply submission captures an immutable target; acceptance is not delivery (issue #13)
+
+Context: the read-only page needed a reply composer without a selection
+change redirecting an in-flight reply, without duplicate submissions, and
+without a 202 receipt implying the agent received anything.
+
+Decision: on submit, `src/page.js` snapshots the selected question's
+sessionId/questionId/revision and the typed text in one synchronous step and
+builds the request path and body from that snapshot only, so later selection
+changes cannot redirect or rewrite an in-flight reply. Only one reply may be
+in flight: while pending the button is disabled and further submits make no
+second request. Invalid input (incomplete target, missing revision, blank
+text) is rejected before any fetch with an explicit "reply not sent (…)"
+status line. A `202` is reported as "reply accepted for routing"; the page
+never claims delivery or agent acknowledgement, matching the server's
+receipt decision. Failures are labelled and the button is restored.
+
+Consequence: the composer stays minimal — reply text is submitted as typed
+(trimmed), and there is no draft preservation, stale-revision re-targeting or
+retry beyond a fresh manual submit; those come in later issues.
