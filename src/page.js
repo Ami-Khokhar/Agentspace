@@ -14,8 +14,15 @@
  * later selection change cannot redirect an in-flight reply; each
  * composer allows at most one reply in flight (a second submit from the same
  * button makes no second request and says why), and a hung reply can never
- * refuse replies elsewhere on the page. A 202 receipt is worded as acceptance
- * for routing, never as agent acknowledgement.
+ * refuse replies elsewhere on the page. Typed text is kept as a memory-only
+ * draft bound to the exact question identity (session, question id, revision):
+ * it survives selection changes and failed submits, is never copied to or
+ * silently rebound onto another question or revision, and dies with the tab.
+ * A 409 (stale revision or superseded question) blocks that composer until
+ * the pending questions are re-read and the refreshed question is selected;
+ * nothing is resent against a newer revision silently. A 202 receipt is
+ * worded as acceptance for routing — accepted, explicitly not delivered —
+ * never as agent acknowledgement.
  */
 
 const PAGE_HTML = `<!doctype html>
@@ -85,6 +92,11 @@ const PAGE_JS = `'use strict';
   // Each composer guards its own submission; there is no page-global pending
   // flag, so a reply that never settles can never refuse every later reply
   // elsewhere on the page.
+  // Memory-only drafts, keyed by the exact question identity including its
+  // revision: sessionId/questionId/revision -> { revision, text }. A draft
+  // never outlives the tab and is never copied onto another question or
+  // silently rebound to a newer revision.
+  var drafts = {};
   var listError = null;
 
   function el(id) { return document.getElementById(id); }
@@ -210,9 +222,21 @@ const PAGE_JS = `'use strict';
   }
 
   function replyComposer(detail, question) {
+    // A draft is bound to the exact revision it was typed against; the
+    // question row object itself carries a stale flag from an earlier
+    // rejected reply.
+    var draftKey = question.sessionId + '/' + question.questionId + '/' + question.revision;
     line(detail, 'reply to this question:');
     var textArea = document.createElement('textarea');
     textArea.setAttribute('aria-label', 'Reply text for question ' + question.questionId);
+    var draft = drafts[draftKey];
+    if (draft && draft.revision === question.revision) {
+      textArea.value = draft.text;
+      line(detail, 'kept draft restored (in memory only, for this exact question)');
+    }
+    textArea.addEventListener('input', function () {
+      drafts[draftKey] = { revision: question.revision, text: textArea.value };
+    });
     detail.appendChild(textArea);
     var sendButton = document.createElement('button');
     sendButton.type = 'button';
@@ -221,11 +245,27 @@ const PAGE_JS = `'use strict';
     statusLine.setAttribute('role', 'status');
     detail.appendChild(sendButton);
     detail.appendChild(statusLine);
+    if (question.stale) {
+      // A question the server already rejected once stays unreplyable here:
+      // refreshing means re-reading the pending questions and selecting the
+      // refreshed question, never resending against a silently new revision.
+      line(detail, 'stale: the server rejected this question (it changed afterwards).');
+      line(detail, 'The draft below stays for this exact question. Reload the pending questions (select the session again), then select the refreshed question to reply.');
+      sendButton.disabled = true;
+      sendButton.addEventListener('click', function () {
+        statusLine.textContent = 'reply blocked: this question is stale. Reload the pending questions (select the session again), then select the refreshed question';
+      });
+      return;
+    }
     // Submitting is per composer: at most one in flight from this button, so
     // a second submit makes no second request. Other composers elsewhere are
     // never blocked by this one.
     var replyBusy = false;
     sendButton.addEventListener('click', function () {
+      if (question.stale) {
+        statusLine.textContent = 'reply blocked: this question is stale. Reload the pending questions (select the session again), then select the refreshed question';
+        return;
+      }
       if (replyBusy) {
         statusLine.textContent = 'a reply is already being sent for this question';
         return;
@@ -262,7 +302,12 @@ const PAGE_JS = `'use strict';
       settle();
       return settled;
     }
+    // Whatever happens next, the exact text typed for this exact question is
+    // kept as a memory-only draft, so a failed or lost reply is not lost with it.
+    drafts[question.sessionId + '/' + question.questionId + '/' + question.revision] =
+      { revision: question.revision, text: text };
     sendButton.disabled = true;
+    var blocked = false;
     var revision = question.revision;
     var url = '/sessions/' + encodeURIComponent(question.sessionId) +
       '/questions/' + encodeURIComponent(question.questionId) + '/reply';
@@ -273,17 +318,32 @@ const PAGE_JS = `'use strict';
       body: JSON.stringify({ revision: revision, text: text }),
     })
       .then(function (response) {
-        // Only 202 is acceptance. It never claims delivery or agent
+        // Only 202 is acceptance, and it never claims delivery or agent
         // acknowledgement: no agent receives input in this build.
         if (response.status !== 202) throw new Error('status-' + response.status);
-        statusLine.textContent = 'reply accepted for routing';
+        statusLine.textContent = 'reply accepted for routing; no agent has received it yet';
         settle();
       })
       .catch(function (err) {
-        statusLine.textContent = 'reply not accepted (' + err.message + ')';
+        if (err.message === 'status-409') {
+          // Stale: the server refused the question or its revision. Mark the
+          // question object so re-opening it cannot silently resend against a
+          // newer revision; the draft stays bound to its exact old revision.
+          question.stale = true;
+          blocked = true;
+          statusLine.textContent = 'reply not accepted: the question is no longer current (revision ' + revision + ' was refused). The draft is kept for this exact question. Reload the pending questions (select the session again), then select the refreshed question';
+          sendButton.disabled = true;
+          settle();
+          return;
+        }
+        if (err.message && err.message.indexOf('status-') === 0) {
+          statusLine.textContent = 'reply not accepted (' + err.message + ')';
+        } else {
+          statusLine.textContent = 'network error: the reply was not sent (' + err.message + ')';
+        }
       })
       .then(function () {
-        sendButton.disabled = false;
+        if (!blocked) sendButton.disabled = false;
         settle();
       });
     return settled;
