@@ -8,6 +8,7 @@ const { PassThrough } = require('node:stream');
 const { createServer } = require('../src/server');
 const { PAGE_HTML, PAGE_JS } = require('../src/page');
 const { startLauncher } = require('../src/launcher');
+const { createSandbox } = require('./dom');
 
 async function start() {
   const service = createServer({ port: 0 });
@@ -129,33 +130,28 @@ test('served page script keeps the token in memory and sends it only as Authoriz
   try {
     const appJs = (await get('/app.js')).text;
 
-    const signin = stubElement();
-    const tokenInput = stubElement();
-    const status = stubElement();
-    const sandbox = {
-      document: {
-        getElementById: (id) => ({ signin, token: tokenInput, status }[id] || null),
-      },
-    };
-    sandbox.globalThis = sandbox;
+    const ids = ['signin', 'token', 'status', 'reload', 'sessions', 'sessions-state',
+      'session-state', 'pending', 'pending-state', 'context', 'context-state'];
+    const { elements, sandbox } = createSandbox(ids);
     vm.runInNewContext(appJs, sandbox, { filename: 'served-app.js' });
 
     const fetchCalls = [];
     sandbox.fetch = async (url, options) => {
       fetchCalls.push({ url, options });
-      return { ok: true, json: async () => ({ sessions: [{ sessionId: 'session-1', status: 'working' }] }) };
+      return { ok: true, json: async () => ({ sessions: [{ sessionId: 'session-1', status: 'working', hasPendingQuestion: false }] }) };
     };
 
-    tokenInput.value = 'secret-page-token';
+    elements.token.value = 'secret-page-token';
     // Simulate the browser firing the submit event on the form.
-    assert.equal(typeof signin.listeners.submit, 'function', 'script registers a submit handler');
-    signin.listeners.submit.call(null, { preventDefault() {} });
+    assert.equal(typeof elements.signin.listeners.submit, 'function', 'script registers a submit handler');
+    elements.signin.listeners.submit.call(null, { preventDefault() {} });
 
     await new Promise((r) => setImmediate(r));
-    assert.equal(fetchCalls.length, 1, 'bootstrap does one fetch');
+    assert.equal(fetchCalls.length, 1, 'bootstrap itself does one fetch');
     assert.equal(fetchCalls[0].url, '/sessions', 'token is never put in the URL');
     assert.equal(fetchCalls[0].options.headers.authorization, 'Bearer secret-page-token');
-    assert.equal(status.textContent, 'connected', 'bootstrap reports success without rendering sessions');
+    assert.equal(elements.status.textContent, 'connected', 'bootstrap reports success');
+    assert.ok(elements.sessions.children.length === 1, 'the fetched session list is rendered once');
   } finally {
     await service.close();
   }
@@ -195,10 +191,6 @@ test('launcher keeps the token out of a fake-TTY echo (raw mode, muted output)',
     await launcher.close();
   }
 });
-
-function stubElement() {
-  return { listeners: {}, addEventListener(type, fn) { this.listeners[type] = fn; }, textContent: '', value: '' };
-}
 
 test('launcher: manual token entry, nothing about the token is printed, page is reachable', async () => {
   const input = new PassThrough();

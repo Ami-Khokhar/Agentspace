@@ -35,14 +35,43 @@ Executed evidence (Node v24.21.0, npm 11.19.0):
 
 ```
 $ npm test
-ℹ tests 7
-ℹ pass 7
+ℹ tests 26
+ℹ pass 26
 ℹ fail 0
 ```
 
 ## Design decisions
 
 See `docs/decisions.md`.
+
+## Local read-only page
+
+The page (`/` and `/app.js`, both fixed literals in `src/page.js`) is a small
+plain-JS read-only client over the routes above:
+
+- After a connect with the token (in memory only, sent as an `Authorization`
+  header, never in a URL) it lists the sessions from `GET /sessions` and each
+  session's explicit status; a `Reload sessions` button re-reads the list.
+- Selecting a session reads it by its exact session id, never by text
+  matching: `GET /sessions/:id` and `GET /sessions/:id/questions/pending`.
+  It shows the session's status and its pending questions; selecting a
+  question by its exact id shows that question's text in a panel.
+- Every untrusted value — session ids, question ids, statuses, question text —
+  is placed with `textContent` only. The page never parses server data as HTML.
+- There are loading, empty and read-error states only. A failed read empties
+  the failing area and says so; stale results are never shown as current.
+- There is no reply composer yet: the client issues GET requests only.
+
+### Manual accessibility checks (per change to the page)
+
+With `npm start` open in a browser, check:
+
+1. Keyboard only: `Tab` reaches the token field, Connect, Reload sessions, each
+   session button and each question button in DOM order; every focused control
+   shows a visible outline (the page styles `:focus-visible`).
+2. At a narrow window width (under 40 rem) the two sections stack vertically.
+3. The `role="status"` lines announce loading/empty/error state changes
+   (check with a screen reader or by watching the text).
 
 ## Local launcher
 
