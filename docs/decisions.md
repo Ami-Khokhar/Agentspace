@@ -16,8 +16,14 @@ pending lists inert: a stale row can never display another session's
 question. Everything stays `textContent`-rendered, and the page remains
 read-only (no reply or reply-context requests exist).
 
-Consequence: delayed reads of either kind, clicked in any order, can only
-affect the selection that issued them. The composer stays a later issue.
+Each read also handles its own failure: the pending-questions read carries its
+own catch, so a failure there clears and labels only the pending panel, and
+can never erase or misreport the session state that already rendered
+successfully. The session state read's catch affects only the session panel.
+
+Consequence: delayed reads of either kind, clicked in any order, and failures
+of either read can only affect their own selection and their own panel. The
+composer stays a later issue.
 
 ## 2026-10-08: Read-only inbox with selection generation (issue #18)
 

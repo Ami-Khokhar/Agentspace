@@ -76,7 +76,9 @@ After a successful token sign-in, the page's `app.js` shows a read-only inbox:
   pending questions (`GET /sessions/:sessionId/questions/pending`) under the
   same generation guard, and lists them. An empty list shows an explicit
   "has no pending questions" line; the previous session's questions are
-  cleared and never reused.
+  cleared and never reused. Each read carries its own failure handling: a
+  failing pending-questions read clears and labels only the pending panel,
+  leaving the already rendered session state untouched.
 - Pending question rows are selectable: a selected question shows its exact
   identity — question id, its own session id, revision, and text. Switching
   sessions clears the question panel and makes rows of earlier pending lists

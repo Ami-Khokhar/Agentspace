@@ -339,6 +339,47 @@ test('switching clears content immediately and a slower earlier read cannot repl
   assert.equal(app.elements['session-list'].children[1].className, '', 'the other row is not marked');
 });
 
+test('a failing pending-questions read leaves the session state intact and labels the right read', async () => {
+  const app = runApp();
+  app.connect();
+  app.pending[0].resolveJson({
+    sessions: [
+      { sessionId: 'session-1', status: 'needs-user', hasPendingQuestion: true },
+      { sessionId: 'session-2', status: 'needs-user', hasPendingQuestion: true },
+    ],
+  });
+  await flush();
+  app.select('session-1');
+  app.pending[1].resolveJson({
+    sessionId: 'session-1',
+    status: 'needs-user',
+    activeQuestion: { questionId: 'question-1', revision: 1, text: 'help?', status: 'open' },
+  });
+  await flush();
+
+  // The pending read fails (bad status). It must not erase the session state
+  // that just rendered, and the error must name the pending read, not the
+  // session which actually loaded.
+  assert.equal(app.fetches[2].url, '/sessions/session-1/questions/pending');
+  app.pending[2].rejectError(new Error('status-500'));
+  await flush();
+  const detail = app.elements['session-detail'].textContent;
+  assert.match(detail, /session: session-1/, `session detail keeps its state, saw: ${detail}`);
+  assert.match(detail, /status: needs-user/);
+  assert.match(detail, /open question: help\?/);
+  assert.ok(!detail.includes('could not load'), `no session-load error is invented, saw: ${detail}`);
+  const list = app.elements['question-list'].textContent;
+  assert.match(list, /could not load pending questions \(status-500\)/);
+  assert.ok(!list.includes('loading pending questions'), 'the loading state is replaced by the error');
+
+  // A failing session state read still reports against that read only.
+  app.select('session-2');
+  app.pending[3].rejectError(new Error('status-401'));
+  await flush();
+  assert.match(app.elements['session-detail'].textContent, /could not load session-2 \(status-401\)/);
+  assert.match(app.elements['question-list'].textContent, /loading pending questions/, 'session failure does not fake a pending failure');
+});
+
 test('session and question text rendered by the script is inert, not markup', async () => {
   const app = runApp();
   const hostileText = '<b>bold</b><script>alert(1)</script><img src=x>';

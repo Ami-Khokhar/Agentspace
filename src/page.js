@@ -171,14 +171,20 @@ const PAGE_JS = `'use strict';
           .then(function (pending) {
             if (gen !== selectionGeneration || selectedSessionId !== sessionId) return;
             renderQuestionList(pending.questions);
+          })
+          .catch(function (err) {
+            // Only the pending read's own panel is affected: a failure here
+            // must not erase or mislabel the session state, which may have
+            // rendered correctly already.
+            if (gen !== selectionGeneration || selectedSessionId !== sessionId) return;
+            questionsList.textContent = '';
+            line(questionsList, 'could not load pending questions (' + err.message + ')');
           });
       })
       .catch(function (err) {
         if (gen !== selectionGeneration || selectedSessionId !== sessionId) return;
         detail.textContent = '';
         line(detail, 'could not load ' + sessionId + ' (' + err.message + ')');
-        questionsList.textContent = '';
-        line(questionsList, 'could not load pending questions (' + err.message + ')');
       });
   }
 
