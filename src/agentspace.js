@@ -22,6 +22,7 @@ const STATE_EVENT_TYPES = Object.assign(Object.create(null), {
 });
 
 const TERMINAL_STATES = new Set(['finished', 'disconnected']);
+const STATUSES = new Set(['working', 'needs-user', ...TERMINAL_STATES]);
 
 /** Errors are distinguished by name so callers can route on them. */
 const ERRORS = {
@@ -174,7 +175,38 @@ function createAgentSpace() {
     };
   }
 
-  return { createSession, ask, reply, sendEvent, getSessionState };
+  /** List sessions, optionally filtered by a status. Ordered by creation. */
+  function listSessions(filterStatus) {
+    if (filterStatus !== undefined && !STATUSES.has(filterStatus)) {
+      fail(ERRORS.badEvent, `unknown session status ${JSON.stringify(filterStatus)}`);
+    }
+    const out = [];
+    for (const session of sessions.values()) {
+      const active = session.activeQuestionId ? session.questions.get(session.activeQuestionId) : null;
+      if (filterStatus !== undefined && session.status !== filterStatus) continue;
+      out.push({
+        sessionId: session.id,
+        status: session.status,
+        hasPendingQuestion: active !== null,
+      });
+    }
+    return out;
+  }
+
+  /** Questions awaiting a reply, optionally scoped to one session. Ordered by revision. */
+  function listPendingQuestions(sessionId) {
+    const scoped = sessionId === undefined ? [...sessions.values()] : [getSession(sessionId)];
+    const out = [];
+    for (const session of scoped) {
+      if (!session.activeQuestionId) continue;
+      const q = session.questions.get(session.activeQuestionId);
+      out.push({ sessionId: session.id, questionId: q.id, revision: q.revision, text: q.text });
+    }
+    out.sort((a, b) => a.revision - b.revision || a.sessionId.localeCompare(b.sessionId));
+    return out;
+  }
+
+  return { createSession, ask, reply, sendEvent, getSessionState, listSessions, listPendingQuestions };
 }
 
 module.exports = { createAgentSpace, AgentSpaceError, ERRORS, STATE_EVENT_TYPES, TERMINAL_STATES };
