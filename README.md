@@ -60,6 +60,27 @@ See `docs/decisions.md`.
 - The launcher then prints only the loopback page address (no token in it) and
   starts the service below; the page's form takes the token into memory.
 
+## Local page inbox (read-only)
+
+After a successful token sign-in, the page's `app.js` shows a read-only inbox:
+
+- The session list (`GET /sessions`) with each session's explicit status from
+  the API, plus a "Reload sessions" button. Nothing is shown for a session
+  until it is selected.
+- Clicking a session selects it and reads its state (`GET
+  /sessions/:sessionId`). Switching clears the detail panel synchronously, and
+  each selection carries a generation counter: a read response from an earlier
+  selection that arrives late is discarded, so it can never paint a previous
+  session's content over the current selection.
+- All session and question content is rendered with `textContent` into new
+  elements; script/markup-like session or question text stays inert text and
+  is never parsed as markup.
+- There are no reply controls and no questions panel yet; the page is
+  read-only over the API.
+
+The page uses no external assets, storage or network beyond its own loopback
+service, and the token stays in memory and in the `Authorization` header only.
+
 ## Local HTTP service
 
 `createServer({ space, port, secret })` (from `src/server.js`) exposes the core
