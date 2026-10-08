@@ -44,6 +44,22 @@ $ npm test
 
 See `docs/decisions.md`.
 
+## Local launcher
+
+`npm start` (or `node src/launcher.js`) runs `startLauncher()` from
+`src/launcher.js`. Safe local bootstrap:
+
+- The launcher asks the operator to type a local token once. It puts the
+  terminal into raw mode (readline `terminal: true`), so the OS line
+  discipline never echoes the typed characters; readline's echo goes to a
+  muted stream that drops everything except line breaks. Readline history is
+  disabled.
+- The token exists only in memory: the launcher's process, the page's
+  `Authorization` header, and the browser tab. It never appears in a URL, in
+  any log or terminal output, or in any stored data.
+- The launcher then prints only the loopback page address (no token in it) and
+  starts the service below; the page's form takes the token into memory.
+
 ## Local HTTP service
 
 `createServer({ space, port, secret })` (from `src/server.js`) exposes the core
