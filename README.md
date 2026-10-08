@@ -35,8 +35,8 @@ Executed evidence (Node v24.21.0, npm 11.19.0):
 
 ```
 $ npm test
-ℹ tests 31
-ℹ pass 31
+ℹ tests 41
+ℹ pass 41
 ℹ fail 0
 ```
 
@@ -120,8 +120,30 @@ After a successful token sign-in, the page's `app.js` shows a read-only inbox:
   gives every control a visible `:focus-visible` outline; rows and buttons
   enlarge at `max-width: 600px` so the page stays usable on narrow screens.
 - There is no reply editing beyond one submission at a time: the composer is
-  sent as-is by the button; draft preservation and stale-revision handling are
-  later work.
+  sent as-is by the button. Draft preservation, stale-revision blocking and
+  honest failure wording are described below.
+- Drafts are memory-only and exact: whatever is typed for a question is kept
+  under that question's full identity (session id, question id, revision) in
+  the browser tab's memory and nowhere else. It survives switching sessions
+  or questions and a failed or network-lost submit, is restored when the exact
+  same question identity is selected again ("kept draft restored"), and is
+  never copied to another question or silently rebound onto a newer revision:
+  a pending row at a newer revision of the same question starts with an empty
+  composer, and only its own submission targets the new revision.
+- When the server rejects a submission with `409` (stale revision or
+  superseded question), the composer is blocked permanently for that
+  question: further clicks make no request and the status line says the
+  question is no longer current, the draft is kept for that exact question,
+  and the recovery is to reload the pending questions (select the session
+  again) and select the refreshed question. Nothing is ever resent against a
+  newer revision without that explicit refresh-and-reselect step.
+- Failure wording is honest and specific:
+  - accepted: `202` → "reply accepted for routing; no agent has received it
+    yet" — accepted-not-delivered, never agent acknowledgement;
+  - server refusal (non-409 statuses, e.g. `500`) → "reply not accepted
+    (status-…)" with the composer unlocked for a deliberate retry;
+  - network failure → "network error: the reply was not sent (…)";
+  - stale `409` → explicit blocked state as above.
 
 ## Manual browser checks (not automated evidence)
 
@@ -146,6 +168,14 @@ them were executed by automated tooling, and no claim below is a test result:
 4. Mobile width: in the browser's responsive mode, narrow the window below
    600 px. Expected: rows and buttons grow taller (≥44 px touch targets) and
    the layout stays single-column with no horizontal scrolling.
+5. Drafts and stale handling (requires a second ask in a session, e.g. via the
+   events/question endpoints from a second local terminal): type a reply for a
+   question, switch to another session and back — the draft text is restored
+   for that exact question only; the other question's composer was empty.
+   Restart the tab — the draft is gone (memory only). Submit a reply after the
+   question was superseded server-side: expected is the "no longer current"
+   block with no resend until you reselect the session (refreshing the
+   pending questions) and pick the refreshed question.
 
 The page uses no external assets, storage or network beyond its own loopback
 service, and the token stays in memory and in the `Authorization` header only.

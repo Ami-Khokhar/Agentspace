@@ -18,6 +18,7 @@ class FakeElement {
     this.className = '';
     this.hidden = false;
     this.disabled = false;
+    this.value = '';
     this.textContent = '';
     this.listeners = {};
   }
@@ -823,4 +824,111 @@ test('a held pending reply never blocks a fresh composer after a session switch'
   await flush();
   assert.equal(first.sendButton.disabled, false, 'the first composer unlocks when its own reply settles');
   assert.equal(second.sendButton.disabled, true, 'the second reply is unaffected');
+});
+
+test('a draft is kept for its exact question across selection changes and never copied elsewhere', async () => {
+  const app = runApp();
+  app.connect();
+  app.pending[0].resolveJson({
+    sessions: [
+      { sessionId: 'session-1', status: 'needs-user', hasPendingQuestion: true },
+      { sessionId: 'session-2', status: 'needs-user', hasPendingQuestion: true },
+    ],
+  });
+  await flush();
+  await selectLoadedQuestion(app, 'session-1', { sessionId: 'session-1', questionId: 'question-1', revision: 2, text: 'one?' });
+  app.selectQuestion('question-1');
+  let composer = composerOf(app);
+  composer.textArea.value = 'draft for question-1 only';
+  composer.sendButton.trigger('click', {});
+  await flush();
+  // The submit fails on the network; the draft must survive it.
+  app.pending.findLast((p) => /\/reply$/.test(p.entry.url)).rejectError(new TypeError('network gone'));
+  await flush();
+  assert.match(composer.statusLine.textContent, /network error: the reply was not sent \(network gone\)/);
+
+  // Switch to another session's question: its composer starts empty, with no
+  // copy of the failed draft.
+  await selectLoadedQuestion(app, 'session-2', { sessionId: 'session-2', questionId: 'question-2', revision: 7, text: 'two?' });
+  app.selectQuestion('question-2');
+  const other = composerOf(app);
+  assert.equal(other.textArea.value, '', 'no draft is copied to another question');
+  other.textArea.value = 'draft for question-2';
+
+  // Return to the exact original question under the same identity: its own
+  // failed draft is restored.
+  await selectLoadedQuestion(app, 'session-1', { sessionId: 'session-1', questionId: 'question-1', revision: 2, text: 'one?' });
+  app.selectQuestion('question-1');
+  const back = composerOf(app);
+  assert.equal(back.textArea.value, 'draft for question-1 only', 'the failed draft survives for its exact question');
+  assert.match(app.elements['question-detail'].textContent, /kept draft restored/);
+});
+
+test('a draft is never silently rebound to a newer revision of the same question', async () => {
+  const app = runApp();
+  app.connect();
+  app.pending[0].resolveJson({ sessions: [{ sessionId: 'session-1', status: 'needs-user', hasPendingQuestion: true }] });
+  await flush();
+  await selectLoadedQuestion(app, 'session-1', { sessionId: 'session-1', questionId: 'question-1', revision: 2, text: 'typed at revision 2' });
+  app.selectQuestion('question-1');
+  var first = composerOf(app);
+  first.textArea.value = 'draft at revision 2';
+  first.textArea.trigger('input', {});
+
+  // The session is re-read and now lists the same question at a newer
+  // revision; the old draft must not appear as if it targeted revision 4.
+  await selectLoadedQuestion(app, 'session-1', { sessionId: 'session-1', questionId: 'question-1', revision: 4, text: 'superseded by revision 4' });
+  app.selectQuestion('question-1');
+  const composer = composerOf(app);
+  assert.equal(composer.textArea.value, '', 'no draft silently moved onto the newer revision');
+  composer.textArea.value = 'reply at revision 4';
+  composer.sendButton.trigger('click', {});
+  await flush();
+  const sent = app.fetches.findLast((f) => /\/reply$/.test(f.url));
+  assert.equal(JSON.parse(sent.options.body).revision, 4, 'the new submission targets the actual revision');
+  // Restoring the revision-2 draft later still goes back to revision 2.
+  await selectLoadedQuestion(app, 'session-1', { sessionId: 'session-1', questionId: 'question-1', revision: 2, text: 'back at old revision' });
+  app.selectQuestion('question-1');
+  assert.equal(composerOf(app).textArea.value, 'draft at revision 2', 'the old draft still belongs to its own revision');
+});
+
+test('a 409 stale reply blocks resubmission until the question is refreshed and selected again', async () => {
+  const app = runApp();
+  app.connect();
+  app.pending[0].resolveJson({ sessions: [{ sessionId: 'session-1', status: 'needs-user', hasPendingQuestion: true }] });
+  await flush();
+  await selectLoadedQuestion(app, 'session-1', { sessionId: 'session-1', questionId: 'question-1', revision: 2, text: 'stale soon' });
+  app.selectQuestion('question-1');
+  const { textArea, sendButton, statusLine } = composerOf(app);
+  textArea.value = 'for revision 2';
+  sendButton.trigger('click', {});
+  await flush();
+  app.pending.findLast((p) => /\/reply$/.test(p.entry.url)).resolveRaw({ status: 409 });
+  await flush();
+  assert.match(statusLine.textContent, /no longer current/);
+  assert.match(statusLine.textContent, /kept for this exact question/, 'the draft is named as kept');
+  assert.match(statusLine.textContent, /select the refreshed question/, 'the recovery path is named');
+
+  // Clicking again makes no second request against the old target.
+  const before = replyCount(app);
+  sendButton.trigger('click', {});
+  await flush();
+  assert.equal(replyCount(app), before, 'a stale composer makes no further requests');
+  assert.match(statusLine.textContent, /reply blocked: this question is stale/);
+
+  // Refresh: re-select the session, re-read pending questions; the server
+  // now lists a newer revision. Selecting the refreshed question gives a
+  // live composer that targets the new revision, nothing was resent before.
+  await selectLoadedQuestion(app, 'session-1', { sessionId: 'session-1', questionId: 'question-1', revision: 3, text: 'refreshed' });
+  app.selectQuestion('question-1');
+  const fresh = composerOf(app);
+  assert.equal(fresh.sendButton.disabled, false, 'the refreshed question gets a live composer');
+  assert.match(app.elements['question-detail'].textContent, /revision: 3/);
+  fresh.textArea.value = 'for revision 3';
+  fresh.sendButton.trigger('click', {});
+  await flush();
+  const sent = app.fetches.findLast((f) => /\/reply$/.test(f.url));
+  assert.equal(sent.url, '/sessions/session-1/questions/question-1/reply');
+  assert.deepEqual(JSON.parse(sent.options.body), { revision: 3, text: 'for revision 3' }, 'only the manually refreshed submission goes out');
+  assert.equal(replyCount(app), before + 1, 'no silent resend happened');
 });

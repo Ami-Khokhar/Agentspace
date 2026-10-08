@@ -140,3 +140,29 @@ receipt decision. Failures are labelled and the button is restored.
 Consequence: the composer stays minimal — reply text is submitted as typed
 (trimmed), and there is no draft preservation, stale-revision re-targeting or
 retry beyond a fresh manual submit; those come in later issues.
+
+## 2026-10-08: Exact-question memory drafts, stale 409 blocking, accepted-not-delivered wording (issue #14)
+
+Context: replies typed into the composer were lost on any selection change or
+failed submit; a 409 (stale revision / superseded question) gave no
+recovery path and invited a blind resend against a newer revision; the 202
+wording could imply the input had reached something.
+
+Decision: `src/page.js` keeps drafts as plain in-memory objects keyed by the
+full question identity including the revision
+(`sessionId/questionId/revision`). A draft is saved while typing (`input`
+event) and again at submission, survives selection changes and failed or
+network-lost sends, and is restored only for the identical
+session/question/revision — never copied to another question and never
+silently rebound to a newer revision. A `409` marks the client-side question
+object stale and disables that composer permanently: further clicks make no
+request, the status line says the question is no longer current and names the
+recovery (re-select the session to reload pending questions, then select the
+refreshed question). A `202` is worded "reply accepted for routing; no agent
+has received it yet" (accepted-not-delivered); non-409 statuses are
+"reply not accepted (status-…)", network failures
+"network error: the reply was not sent (…)".
+
+Consequence: no new storage, privacy or control surface — drafts live and
+die with the tab like the token; sending remains a single explicit POST per
+submission and only the server can make a question current again.
