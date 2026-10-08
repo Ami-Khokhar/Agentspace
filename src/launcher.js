@@ -9,16 +9,35 @@
  */
 
 const readline = require('node:readline');
+const { Writable } = require('node:stream');
 const { createServer } = require('./server');
 
-/** Read one line without echoing the characters that were typed. */
+/**
+ * Ask with terminal: true, so readline enables raw mode on a real TTY: the
+ * terminal's own line discipline (which would echo every typed character into
+ * scrollback) is switched off, and readline's echo goes only to the muted
+ * stream below, where every non-newline character is stripped. History is
+ * disabled so the token never enters readline's in-memory history either.
+ */
 function askHidden(query, input, output) {
   output.write(query);
+  // Muted echo stream: readline (terminal: true) writes its echo and cursor
+  // control here; every character except line breaks is dropped, so nothing
+  // typed is ever visible on the terminal or in scrollback.
+  const muted = new Writable({
+    write(chunk, _enc, cb) {
+      const text = String(chunk);
+      const newlines = text.replace(/[^\n\r]/g, '');
+      if (newlines) output.write(newlines);
+      cb();
+    },
+  });
   return new Promise((resolve, reject) => {
     const rl = readline.createInterface({
       input,
-      terminal: false,
-      output: { write: (chunk) => { output.write(String(chunk).replace(/[^\n\r]/g, '')); return true; } },
+      output: muted,
+      terminal: true,
+      historySize: 0,
     });
     let settled = false;
     const settle = (value) => { if (!settled) { settled = true; rl.close(); resolve(value); } };

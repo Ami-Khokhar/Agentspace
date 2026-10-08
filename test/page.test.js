@@ -161,6 +161,41 @@ test('served page script keeps the token in memory and sends it only as Authoriz
   }
 });
 
+test('launcher keeps the token out of a fake-TTY echo (raw mode, muted output)', async () => {
+  // A real terminal would echo typed characters back through readline's
+  // output stream. The fake TTY records that channel separately from the
+  // launcher's own prompt output so a mute bug cannot hide behind
+  // PassThrough's lack of echo (the regression this guards: terminal: false
+  // left the OS line discipline echoing the token verbatim into scrollback).
+  const ttyEcho = [];
+  const fakeTtyInput = new PassThrough();
+  fakeTtyInput.isTTY = true;
+  const rawModes = [];
+  fakeTtyInput.setRawMode = (mode) => { rawModes.push(mode); };
+  const fakeTtyOutput = new PassThrough();
+  const originalWrite = fakeTtyOutput.write.bind(fakeTtyOutput);
+  fakeTtyOutput.write = (chunk, ...rest) => {
+    ttyEcho.push(String(chunk));
+    return originalWrite(chunk, ...rest);
+  };
+  const captured = [];
+  const output = { write: (s) => { captured.push(String(s)); return true; } };
+  const pending = startLauncher({ input: fakeTtyInput, output });
+  await new Promise((r) => setTimeout(r, 20));
+  fakeTtyInput.write('echo-secret-token\r');
+  const launcher = await pending;
+  try {
+    assert.ok(rawModes.includes(true), 'readline must enable raw mode so the OS never echoes');
+    const echoed = ttyEcho.join('');
+    assert.ok(!echoed.includes('echo-secret-token'), 'nothing echoed to the terminal names the token');
+    const printed = captured.join('');
+    assert.ok(!printed.includes('echo-secret-token'), 'launcher output never names the token');
+    assert.ok(/Type a local token/.test(captured.join('')));
+  } finally {
+    await launcher.close();
+  }
+});
+
 function stubElement() {
   return { listeners: {}, addEventListener(type, fn) { this.listeners[type] = fn; }, textContent: '', value: '' };
 }
