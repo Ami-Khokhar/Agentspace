@@ -1,0 +1,9 @@
+{
+  "name": "agentspace",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first prototype: session/question state with explicit reply routing",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}
