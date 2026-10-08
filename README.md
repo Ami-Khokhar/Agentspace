@@ -43,3 +43,45 @@ $ npm test
 ## Design decisions
 
 See `docs/decisions.md`.
+
+## Local HTTP service
+
+`createServer({ space, port, secret })` (from `src/server.js`) exposes the core
+over HTTP for a first-party local browser client or CLI:
+
+- Binds to `127.0.0.1` only, on an ephemeral port. There is no host/interface
+  option and no way to bind publicly.
+- A random per-launch bearer secret is generated (or passed by the local
+  launcher) and required as `Authorization: Bearer <secret>` on every read and
+  write. It is returned once to the caller for the client's bootstrap; the
+  service never writes it to any log, URL or response.
+- Requests with a non-loopback peer address, a `Host` other than
+  `127.0.0.1:<port>` / `localhost:<port>` / `[::1]:<port>` (DNS-rebinding
+  guard), or an `Origin` other than the loopback origin of the same port are
+  rejected. No `Access-Control-Allow-*` headers are ever sent: no cross-origin
+  use is supported. A first-party page must be served from (or opened at) the
+  loopback origin itself; browsers consider `http://127.0.0.1:<port>` and the
+  service both first-party local, so fetches from a page opened directly on
+  that origin carry a matching `Origin` and are accepted.
+- JSON request bodies are capped at 64 KiB and must be JSON objects; invalid
+  JSON, oversized payloads and malformed path identifiers get 400/413 without
+  leaking stack traces or changing state.
+- Only GET and POST are routed; there is no shell endpoint, file access,
+  external call, or telemetry.
+
+Routes:
+
+- `GET /sessions` → `{ sessions: [{ sessionId, status, hasPendingQuestion }] }`
+- `GET /sessions/:sessionId` → the core's session state
+- `GET /questions/pending` → all open questions
+- `GET /sessions/:sessionId/questions/pending` → open questions of one session
+- `POST /sessions/:sessionId/questions/:questionId/reply`
+  with `{ revision, text }` → `202 { accepted: true, note }` or an error:
+  `400 badReply`/`badIdentifier`, `404 unknownSession`/`unknownQuestion`,
+  `409 questionNotOpen`/`revisionMismatch`/`sessionClosed`.
+- `POST /sessions/:sessionId/events` with `{ type }` → core event
+
+The 202 receipt says the input was accepted for routing by the local service.
+No agent adapter exists yet, so the receipt never claims any real agent
+received or acknowledged the input; the `note` field says so explicitly and
+the response has no agent-acknowledgement field.
