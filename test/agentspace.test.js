@@ -120,7 +120,7 @@ test('explicit events drive session states through the full lifecycle', () => {
 test('malformed events are rejected without corrupting state', () => {
   const space = createAgentSpace();
   const session = space.createSession();
-  for (const event of [null, undefined, 'working', 42, [], { type: 'guess-from-text' }, { type: 'working', extra: true }, {}]) {
+  for (const event of [null, undefined, 'working', 42, [], { type: 'guess-from-text' }, { type: 'working', extra: true }, {}, { type: 'toString' }, { type: 'constructor' }, { type: 'valueOf' }]) {
     assert.equal(errorCode(() => space.sendEvent(session.sessionId, event)), ERRORS.badEvent, `event ${JSON.stringify(event)}`);
   }
   // ask and reply also validate text/revision before touching state.

@@ -10,12 +10,16 @@
  * No subprocess execution, no network, no telemetry.
  */
 
-const STATE_EVENT_TYPES = {
+// A plain object literal inherits Object.prototype members, so a `type` of
+// 'toString', 'constructor' or any other inherited name would resolve to a
+// function and pass the earlier `status === undefined` check, writing that
+// function into session.status. Own keys only.
+const STATE_EVENT_TYPES = Object.assign(Object.create(null), {
   working: 'working',
   'needs-user': 'needs-user',
   finished: 'finished',
   disconnected: 'disconnected',
-};
+});
 
 const TERMINAL_STATES = new Set(['finished', 'disconnected']);
 
@@ -148,7 +152,7 @@ function createAgentSpace() {
       fail(ERRORS.badEvent, 'event must be an object with a type');
     }
     const status = STATE_EVENT_TYPES[event.type];
-    if (status === undefined || Object.keys(event).some((key) => key !== 'type')) {
+    if (typeof status !== 'string' || Object.keys(event).some((key) => key !== 'type')) {
       fail(ERRORS.badEvent, `unknown event ${JSON.stringify(event)}`);
     }
     const session = getSession(sessionId);
