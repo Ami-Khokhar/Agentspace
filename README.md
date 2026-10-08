@@ -72,11 +72,19 @@ After a successful token sign-in, the page's `app.js` shows a read-only inbox:
   each selection carries a generation counter: a read response from an earlier
   selection that arrives late is discarded, so it can never paint a previous
   session's content over the current selection.
+- After the selected session's state loads, the page reads that session's own
+  pending questions (`GET /sessions/:sessionId/questions/pending`) under the
+  same generation guard, and lists them. An empty list shows an explicit
+  "has no pending questions" line; the previous session's questions are
+  cleared and never reused.
+- Pending question rows are selectable: a selected question shows its exact
+  identity — question id, its own session id, revision, and text. Switching
+  sessions clears the question panel and makes rows of earlier pending lists
+  inert, so a stale control can never display another session's question.
 - All session and question content is rendered with `textContent` into new
   elements; script/markup-like session or question text stays inert text and
   is never parsed as markup.
-- There are no reply controls and no questions panel yet; the page is
-  read-only over the API.
+- There are no reply controls: the page is read-only over the API.
 
 The page uses no external assets, storage or network beyond its own loopback
 service, and the token stays in memory and in the `Authorization` header only.
