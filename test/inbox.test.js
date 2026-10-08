@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
-const { PAGE_JS } = require('../src/page');
+const { PAGE_HTML, PAGE_JS } = require('../src/page');
 
 /**
  * Behavioral tests of the served script: a minimal fake DOM and a controllable
@@ -40,6 +40,15 @@ class FakeElement {
     this.listeners[type] = fn;
   }
 
+  getAttribute(name) {
+    return (this._attrs || {})[name] !== undefined ? this._attrs[name] : null;
+  }
+
+  setAttribute(name, value) {
+    if (!this._attrs) this._attrs = {};
+    this._attrs[name] = String(value);
+  }
+
   trigger(type, event) {
     this.listeners[type](event);
   }
@@ -55,7 +64,7 @@ class FakeElement {
 
 function runApp() {
   const elements = {};
-  const ids = ['signin', 'token', 'status', 'inbox', 'reload-sessions', 'session-list', 'session-detail', 'question-list', 'question-detail'];
+  const ids = ['signin', 'token', 'status', 'inbox', 'reload-sessions', 'retry-reads', 'session-list', 'session-detail', 'question-list', 'question-detail'];
   for (const id of ids) elements[id] = new FakeElement('div');
   const document = {
     getElementById: (id) => elements[id] || null,
@@ -100,6 +109,201 @@ function runApp() {
     },
   };
 }
+
+test('the first sessions read shows honest loading and error states and can recover', async () => {
+  const app = runApp();
+  app.connect();
+  // While the read is outstanding the section holds its own loading state,
+  // not stale content from an earlier state.
+  assert.match(app.elements['session-list'].textContent, /loading sessions/);
+  assert.equal(app.elements['reload-sessions'].disabled, true, 'the reload control is held while the read is in flight');
+
+  // A failing read is labelled where the user looks, and leaves nothing that
+  // could be mistaken for the current list.
+  app.pending[0].rejectError(new Error('status-500'));
+  await flush();
+  const failed = app.elements['session-list'].textContent;
+  assert.match(failed, /could not load sessions \(status-500\)/);
+  assert.ok(!failed.includes('loading sessions'), 'the loading state is replaced by the error');
+  assert.match(app.elements['status'].textContent, /could not load sessions \(status-500\)/);
+  assert.equal(app.elements['reload-sessions'].disabled, false, 'recovery is possible again');
+  assert.equal(app.elements.status.textContent, 'could not load sessions (status-500)');
+  assert.equal(app.elements['session-list'].children.length, 1, 'one honest status line, no stale rows');
+
+  // The retry button re-reads and shows the real sessions.
+  app.elements['retry-reads'].trigger('click', {});
+  assert.equal(app.pending.length, 2);
+  app.pending[1].resolveJson({ sessions: [{ sessionId: 'session-1', status: 'working', hasPendingQuestion: false }] });
+  await flush();
+  assert.match(app.elements['session-list'].textContent, /session-1 — status: working/);
+  assert.ok(!app.elements['session-list'].textContent.includes('could not load sessions'), 'the error is gone');
+  assert.equal(app.elements.status.textContent, 'connected');
+});
+
+test('a failed session state read labels the failure and a retry recovers', async () => {
+  const app = runApp();
+  app.connect();
+  app.pending[0].resolveJson({
+    sessions: [{ sessionId: 'session-1', status: 'needs-user', hasPendingQuestion: true }],
+  });
+  await flush();
+
+  app.select('session-1');
+  app.pending[1].rejectError(new Error('status-503'));
+  await flush();
+  const failed = app.elements['session-detail'].textContent;
+  assert.match(failed, /could not load session-1 \(status-503\)/);
+  assert.ok(!failed.includes('needs-user'), 'no stale status is presented as current');
+  const list = app.elements['question-list'].textContent;
+  assert.match(list, /pending questions unavailable/);
+  assert.ok(!list.includes('loading pending questions'), 'no fake loading state after the dependent read is cancelled');
+  assert.ok(!list.includes('question:'), 'no stale pending question is shown after a failed read');
+
+  // Retrying re-reads only the current selection's own endpoints.
+  app.elements['retry-reads'].trigger('click', {});
+  assert.equal(app.pending[2].entry.url, '/sessions/session-1', 'the retry re-reads the selected session');
+  assert.equal(app.pending.length, 3);
+  app.pending[2].resolveJson({
+    sessionId: 'session-1',
+    status: 'needs-user',
+    activeQuestion: { questionId: 'question-1', revision: 1, text: 'now loaded?', status: 'open' },
+  });
+  await flush();
+  app.pending[3].resolveJson({ questions: [{ sessionId: 'session-1', questionId: 'question-1', revision: 1, text: 'now loaded?' }] });
+  await flush();
+  assert.match(app.elements['session-detail'].textContent, /open question: now loaded\? \(revision 1\)/);
+  assert.match(app.elements['question-list'].textContent, /question: question-1 — revision 1/);
+});
+
+test('a retry after a failed pending read succeeds and shows the real questions', async () => {
+  const app = runApp();
+  app.connect();
+  app.pending[0].resolveJson({
+    sessions: [{ sessionId: 'session-2', status: 'needs-user', hasPendingQuestion: true }],
+  });
+  await flush();
+  app.select('session-2');
+  app.pending[1].resolveJson({ sessionId: 'session-2', status: 'needs-user', activeQuestion: null });
+  await flush();
+  app.pending[2].rejectError(new Error('status-500'));
+  await flush();
+  assert.ok(!app.elements['question-list'].textContent.includes('loading pending questions'), 'no loading content remains');
+  assert.ok(!app.elements['question-list'].textContent.includes('question:'), 'no unrelated question is shown as current');
+  assert.match(app.elements['session-detail'].textContent, /session: session-2/);
+
+  app.elements['retry-reads'].trigger('click', {});
+  assert.equal(app.pending[3].entry.url, '/sessions/session-2');
+  app.pending[3].resolveJson({ sessionId: 'session-2', status: 'needs-user', activeQuestion: null });
+  await flush();
+  app.pending[4].resolveJson({ questions: [{ sessionId: 'session-2', questionId: 'question-9', revision: 4, text: 'recovered?' }] });
+  await flush();
+  assert.match(app.elements['question-list'].textContent, /question: question-9 — revision 4/);
+  assert.ok(!app.elements['question-list'].textContent.includes('pending questions unavailable'), 'recovery replaces the unavailable label');
+  // Every read is still a plain GET of a service read endpoint.
+  for (const f of app.fetches) {
+    assert.ok(/^(\/sessions|\/questions)/.test(f.url), `only service reads are requested, saw ${f.url}`);
+  }
+});
+
+test('session and question rows are keyboard-operable and labelled', async () => {
+  const app = runApp();
+  app.connect();
+  app.pending[0].resolveJson({
+    sessions: [
+      { sessionId: 'session-1', status: 'working', hasPendingQuestion: false },
+      { sessionId: 'session-2', status: 'needs-user', hasPendingQuestion: true },
+    ],
+  });
+  await flush();
+
+  // Both rows are labelled and keyboard accessible.
+  for (const row of app.elements['session-list'].children) {
+    assert.equal(row.tabIndex, 0, 'a session row is in the keyboard tab order');
+    assert.equal(row.getAttribute('role'), 'button');
+    assert.match(row.getAttribute('aria-label'), /Open session session-[12], status /);
+  }
+
+  // Keyboard activation selects the session, like clicking.
+  const row2 = app.elements['session-list'].children[1];
+  row2.trigger('keydown', { key: ' ', preventDefault() {} });
+  assert.ok(app.fetches[1].url.endsWith('/sessions/session-2'), 'Enter/space opens the named session');
+  row2.trigger('keydown', { key: 'Tab', preventDefault() {} });
+  assert.equal(app.fetches.length, 2, 'non-activation keys do nothing');
+
+  app.pending[1].resolveJson({ sessionId: 'session-2', status: 'needs-user', activeQuestion: null });
+  await flush();
+  app.pending[2].resolveJson({ questions: [{ sessionId: 'session-2', questionId: 'question-2', revision: 2, text: 'Proceed?' }] });
+  await flush();
+  const questionRow = app.elements['question-list'].children.find((child) =>
+    child.getAttribute('aria-label') === 'Open question question-2 of session session-2'
+  );
+  assert.ok(questionRow, 'the pending question row is labelled with its exact identity');
+  assert.equal(questionRow.tabIndex, 0);
+  questionRow.trigger('keydown', { key: 'Enter', preventDefault() {} });
+  assert.match(app.elements['question-detail'].textContent, /text: Proceed\?/);
+});
+
+test('the page exposes labelled controls, visible-focus and narrow-screen CSS', async () => {
+  // The sign-in control has a real <label>; read rows use explicit labels.
+  assert.match(PAGE_HTML, /<label for="token">Local token<\/label>/);
+  assert.match(PAGE_HTML, /id="retry-reads" type="button">Retry latest read</);
+  assert.match(PAGE_HTML, /id="reload-sessions" type="button">Reload sessions</);
+  // Visible keyboard focus and a narrow-screen adjustment are in the page,
+  // not left to unreliable browser defaults.
+  assert.match(PAGE_HTML, /:focus-visible \{ outline: 3px solid/);
+  assert.match(PAGE_HTML, /@media \(max-width: 600px\)/);
+  // No inline one-off styles that could unbalance the stylesheet.
+  assert.ok(!PAGE_HTML.includes('style='), 'styling stays in the stylesheet, not inline attributes');
+});
+
+test('a failed session-list label survives a later successful selection read and the list itself can recover', async () => {
+  const app = runApp();
+  app.connect();
+  app.pending[0].resolveJson({
+    sessions: [{ sessionId: 'session-1', status: 'working', hasPendingQuestion: false }],
+  });
+  await flush();
+
+  // Select the session fully, then fail a reload of the list.
+  app.select('session-1');
+  app.pending[1].resolveJson({ sessionId: 'session-1', status: 'working', activeQuestion: null });
+  await flush();
+  app.pending[2].resolveJson({ questions: [] });
+  await flush();
+
+  app.elements['reload-sessions'].trigger('click', {});
+  app.pending[3].rejectError(new Error('status-500'));
+  await flush();
+  assert.match(app.elements['session-list'].textContent, /could not load sessions \(status-500\)/);
+
+  // "Retry latest read" re-runs the selection reads only; that success must
+  // not re-render the empty list array and erase the failed read's label.
+  app.elements['retry-reads'].trigger('click', {});
+  app.pending[4].resolveJson({
+    sessionId: 'session-1',
+    status: 'working',
+    activeQuestion: { questionId: 'question-1', revision: 1, text: 'still here?', status: 'open' },
+  });
+  await flush();
+  app.pending[5].resolveJson({ questions: [] });
+  await flush();
+  const list = app.elements['session-list'].textContent;
+  assert.match(list, /could not load sessions \(status-500\)/, 'the failed list read keeps its own honest label');
+  assert.ok(!list.includes('loading sessions'), 'no fake loading state covers the failure');
+  const detail = app.elements['session-detail'].textContent;
+  assert.match(detail, /session: session-1/);
+  assert.equal(app.fetches[app.fetches.length - 1].url, '/sessions/session-1/questions/pending', 'the retry re-reads the selection, not the list');
+
+  // The documented recovery path for the list is reloading it.
+  app.elements['reload-sessions'].trigger('click', {});
+  app.pending[6].resolveJson({
+    sessions: [{ sessionId: 'session-1', status: 'working', hasPendingQuestion: false }],
+  });
+  await flush();
+  const recovered = app.elements['session-list'].textContent;
+  assert.match(recovered, /session-1 — status: working/);
+  assert.ok(!recovered.includes('could not load sessions'), 'a successful reload clears the old error');
+});
 
 function flush() {
   return new Promise((resolve) => setImmediate(resolve));
@@ -160,8 +364,8 @@ test('two sessions are listed with explicit statuses and either can be selected'
   assert.ok(!app.elements['session-detail'].textContent.includes('session-2'), 'previous selection content is gone');
   assert.ok(!app.elements['question-detail'].textContent.includes('question-2'), 'the question panel is cleared when the session changes');
   assert.match(app.elements['question-list'].textContent, /loading pending questions/);
-  assert.equal(app.elements['session-list'].children[0].className, 'selected', 'the selected row is marked');
-  assert.equal(app.elements['session-list'].children[1].className, '', 'the other row is not marked');
+  assert.equal(app.elements['session-list'].children[0].className.includes('selected'), true, 'the selected row is marked');
+  assert.equal(app.elements['session-list'].children[1].className.includes('selected'), false, 'the other row is not marked');
   // Its own pending read shows an explicit empty state, never session-2's list.
   assert.equal(app.fetches[4].url, '/sessions/session-1/questions/pending');
   app.pending[4].resolveJson({ questions: [] });
@@ -335,8 +539,8 @@ test('switching clears content immediately and a slower earlier read cannot repl
   const final = app.elements['session-detail'].textContent;
   assert.ok(!final.includes('session-2'), `late previous-selection result must be discarded, saw: ${final}`);
   assert.match(final, /session: session-1/);
-  assert.equal(app.elements['session-list'].children[0].className, 'selected', 'selection stays on session-1');
-  assert.equal(app.elements['session-list'].children[1].className, '', 'the other row is not marked');
+  assert.ok(app.elements['session-list'].children[0].className.includes('selected'), 'selection stays on session-1');
+  assert.ok(!app.elements['session-list'].children[1].className.includes('selected'), 'the other row is not marked');
 });
 
 test('a failing pending-questions read leaves the session state intact and labels the right read', async () => {
@@ -377,7 +581,9 @@ test('a failing pending-questions read leaves the session state intact and label
   app.pending[3].rejectError(new Error('status-401'));
   await flush();
   assert.match(app.elements['session-detail'].textContent, /could not load session-2 \(status-401\)/);
-  assert.match(app.elements['question-list'].textContent, /loading pending questions/, 'session failure does not fake a pending failure');
+  const list2 = app.elements['question-list'].textContent;
+  assert.match(list2, /pending questions unavailable/, 'the dependent read is labelled unavailable, not shown as loading');
+  assert.ok(!list2.includes('question:'), 'and no stale question is presented as current');
 });
 
 test('session and question text rendered by the script is inert, not markup', async () => {

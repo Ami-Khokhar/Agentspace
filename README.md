@@ -35,8 +35,8 @@ Executed evidence (Node v24.21.0, npm 11.19.0):
 
 ```
 $ npm test
-ℹ tests 7
-ℹ pass 7
+ℹ tests 31
+ℹ pass 31
 ℹ fail 0
 ```
 
@@ -64,14 +64,26 @@ See `docs/decisions.md`.
 
 After a successful token sign-in, the page's `app.js` shows a read-only inbox:
 
-- The session list (`GET /sessions`) with each session's explicit status from
-  the API, plus a "Reload sessions" button. Nothing is shown for a session
-  until it is selected.
+- The session list (`GET /sessions`) starts with an explicit "loading sessions…"
+  line and a held "Reload sessions" button; a failing read replaces the list with
+  a "could not load sessions (…)" line (the status line repeats it), and the
+  button is re-enabled so the read can be retried. That failure label stays
+  in place even when a later successful read (e.g. a session selection or its
+  "Retry latest read") re-renders the page: the list's own recovery is a
+  successful "Reload sessions". Nothing is shown for a session until it is
+  selected.
 - Clicking a session selects it and reads its state (`GET
   /sessions/:sessionId`). Switching clears the detail panel synchronously, and
   each selection carries a generation counter: a read response from an earlier
   selection that arrives late is discarded, so it can never paint a previous
   session's content over the current selection.
+- A failing session-state read (or a pending-questions read) is labelled
+  explicitly where it happened: "could not load <id> (…)" in the detail panel
+  and "pending questions unavailable" in the questions panel — never stale
+  content from another session presented as current. A "Retry latest read"
+  button re-runs the reads of the current selection or view; every read carries
+  its own failure handling, so a failing pending read leaves the already
+  rendered session state untouched.
 - After the selected session's state loads, the page reads that session's own
   pending questions (`GET /sessions/:sessionId/questions/pending`) under the
   same generation guard, and lists them. An empty list shows an explicit
@@ -86,7 +98,37 @@ After a successful token sign-in, the page's `app.js` shows a read-only inbox:
 - All session and question content is rendered with `textContent` into new
   elements; script/markup-like session or question text stays inert text and
   is never parsed as markup.
+- Accessibility basics: session and pending-question rows are labelled
+  controls (`role="button"`, an `aria-label` naming the session/question and
+  status, focusable with `tabindex="0"`) that respond to Enter and Space as
+  well as click; the sign-in token field has a real `<label>`; the stylesheet
+  gives every control a visible `:focus-visible` outline; rows and buttons
+  enlarge at `max-width: 600px` so the page stays usable on narrow screens.
 - There are no reply controls: the page is read-only over the API.
+
+## Manual browser checks (not automated evidence)
+
+The `npm test` run above exercises the served script against controlled
+responses, but it does **not** perform the following browser checks — none of
+them were executed by automated tooling, and no claim below is a test result:
+
+1. `npm start`, open the printed loopback address, type the local token and
+   press Enter. Expected: the sign-in form has a visible text label, and after
+   connecting the session list loads.
+2. Keyboard: from a fresh page, press `Tab` repeatedly. Expected: a clearly
+   visible outline moves through Token, Connect, Reload sessions, session rows
+   (one per listed session), Retry latest read and any question rows. Press
+   Enter on a session row — its state loads, exactly as if it had been clicked.
+3. Loading, failure and recovery: while the session list is loading, a
+   "loading sessions…" placeholder is visible. Submit a deliberately wrong
+   token once: expected is a "could not load sessions (…)" error line and no
+   sessions shown. Reconnect with the right token and press "Reload sessions":
+   the list recovers. Each session read is independent, so a failing read
+   never shows another session's content — it is labelled and can be retied
+   with "Retry latest read" or by selecting the row again.
+4. Mobile width: in the browser's responsive mode, narrow the window below
+   600 px. Expected: rows and buttons grow taller (≥44 px touch targets) and
+   the layout stays single-column with no horizontal scrolling.
 
 The page uses no external assets, storage or network beyond its own loopback
 service, and the token stays in memory and in the `Authorization` header only.
