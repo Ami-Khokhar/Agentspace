@@ -256,6 +256,55 @@ test('the page exposes labelled controls, visible-focus and narrow-screen CSS', 
   assert.ok(!PAGE_HTML.includes('style='), 'styling stays in the stylesheet, not inline attributes');
 });
 
+test('a failed session-list label survives a later successful selection read and the list itself can recover', async () => {
+  const app = runApp();
+  app.connect();
+  app.pending[0].resolveJson({
+    sessions: [{ sessionId: 'session-1', status: 'working', hasPendingQuestion: false }],
+  });
+  await flush();
+
+  // Select the session fully, then fail a reload of the list.
+  app.select('session-1');
+  app.pending[1].resolveJson({ sessionId: 'session-1', status: 'working', activeQuestion: null });
+  await flush();
+  app.pending[2].resolveJson({ questions: [] });
+  await flush();
+
+  app.elements['reload-sessions'].trigger('click', {});
+  app.pending[3].rejectError(new Error('status-500'));
+  await flush();
+  assert.match(app.elements['session-list'].textContent, /could not load sessions \(status-500\)/);
+
+  // "Retry latest read" re-runs the selection reads only; that success must
+  // not re-render the empty list array and erase the failed read's label.
+  app.elements['retry-reads'].trigger('click', {});
+  app.pending[4].resolveJson({
+    sessionId: 'session-1',
+    status: 'working',
+    activeQuestion: { questionId: 'question-1', revision: 1, text: 'still here?', status: 'open' },
+  });
+  await flush();
+  app.pending[5].resolveJson({ questions: [] });
+  await flush();
+  const list = app.elements['session-list'].textContent;
+  assert.match(list, /could not load sessions \(status-500\)/, 'the failed list read keeps its own honest label');
+  assert.ok(!list.includes('loading sessions'), 'no fake loading state covers the failure');
+  const detail = app.elements['session-detail'].textContent;
+  assert.match(detail, /session: session-1/);
+  assert.equal(app.fetches[app.fetches.length - 1].url, '/sessions/session-1/questions/pending', 'the retry re-reads the selection, not the list');
+
+  // The documented recovery path for the list is reloading it.
+  app.elements['reload-sessions'].trigger('click', {});
+  app.pending[6].resolveJson({
+    sessions: [{ sessionId: 'session-1', status: 'working', hasPendingQuestion: false }],
+  });
+  await flush();
+  const recovered = app.elements['session-list'].textContent;
+  assert.match(recovered, /session-1 — status: working/);
+  assert.ok(!recovered.includes('could not load sessions'), 'a successful reload clears the old error');
+});
+
 function flush() {
   return new Promise((resolve) => setImmediate(resolve));
 }

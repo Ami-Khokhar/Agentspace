@@ -73,6 +73,10 @@ const PAGE_JS = `'use strict';
   // The same isolation for question rows: switching sessions bumps this, so
   // controls from a previous pending list can never act on the new state.
   var questionGeneration = 0;
+  // The latest sessions-list failure, or null. A failure clears the list to
+  // sessions = [], and no later successful read of something else (a session
+  // selection) may re-render that empty array and wipe the honest label.
+  var listError = null;
 
   function el(id) { return document.getElementById(id); }
 
@@ -104,12 +108,14 @@ const PAGE_JS = `'use strict';
       .then(function (body) {
         if (!body || !Array.isArray(body.sessions)) throw new Error('unexpected response');
         sessions = body.sessions;
+        listError = null;
         el('status').textContent = 'connected';
         renderSessionList();
       })
       .catch(function (err) {
         sessions = [];
-        el('status').textContent = 'could not load sessions (' + err.message + ')';
+        listError = 'could not load sessions (' + err.message + ')';
+        el('status').textContent = listError;
         list.textContent = '';
         line(list, 'could not load sessions (' + err.message + ')');
       })
@@ -119,6 +125,13 @@ const PAGE_JS = `'use strict';
   function renderSessionList() {
     var list = el('session-list');
     list.textContent = '';
+    // With a failed list read outstanding, sessions is empty: re-rendering
+    // that array would paint a blank, unlabelled panel. Keep the failure
+    // label; "Reload sessions" is the recovery path for the list itself.
+    if (listError) {
+      line(list, listError);
+      return;
+    }
     sessions.forEach(function (session) {
       var row = document.createElement('div');
       row.className = 'row' + (selectedSessionId === session.sessionId ? ' selected' : '');

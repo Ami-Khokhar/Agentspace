@@ -67,8 +67,11 @@ After a successful token sign-in, the page's `app.js` shows a read-only inbox:
 - The session list (`GET /sessions`) starts with an explicit "loading sessions…"
   line and a held "Reload sessions" button; a failing read replaces the list with
   a "could not load sessions (…)" line (the status line repeats it), and the
-  button is re-enabled so the read can be retried. Nothing is shown for a
-  session until it is selected.
+  button is re-enabled so the read can be retried. That failure label stays
+  in place even when a later successful read (e.g. a session selection or its
+  "Retry latest read") re-renders the page: the list's own recovery is a
+  successful "Reload sessions". Nothing is shown for a session until it is
+  selected.
 - Clicking a session selects it and reads its state (`GET
   /sessions/:sessionId`). Switching clears the detail panel synchronously, and
   each selection carries a generation counter: a read response from an earlier

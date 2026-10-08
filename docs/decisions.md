@@ -101,3 +101,18 @@ evidence from browser checks that were not performed.
 Consequence: the page stays in-memory and first-party (no storage, no remote
 assets, no analytics); future panels on the page must follow the same
 per-read clearing/label/retry pattern instead of caching content.
+
+## 2026-10-08: A failed sessions-list read keeps its label across unrelated re-renders (issue #20)
+
+Context: a failed `GET /sessions` read empties the `sessions` array and paints
+a label into the Sessions panel; any later successful read (a session
+selection or its "Retry latest read") re-rendered the panel from that empty
+array, wiping the label and leaving a blank, unlabelled panel.
+
+Decision: the page tracks the latest list failure explicitly. Re-rendering the
+Sessions panel while a list failure is outstanding redraws the same "could not
+load sessions (…)" label instead of the empty array; only a successful
+"Reload sessions" clears it.
+
+Consequence: each panel's paired failure label and in-memory state move
+together; a recovery action recovers exactly its own panel's read.
