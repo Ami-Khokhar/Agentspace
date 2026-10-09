@@ -272,3 +272,21 @@ Consequence: duplicate replay can never double-consume or mint receipts,
 expiry cannot be undone by a reconnect, and the demo remains local,
 scripted and labelled. Real agents, timers, queues and persistence are still
 out of scope; a real agent adapter would reuse the same boundaries.
+
+## 2026-10-09: Premium workspace identity from local CSS tokens only (issue #41)
+
+Context: the local page asked for a structured, premium visual identity
+(charcoal surfaces, restrained accent, scaled typography) without external
+assets, system fonts only, and without touching service or core behavior.
+
+Decision: `src/page.js`'s fixed HTML gets a token-driven stylesheet (CSS
+custom properties for surfaces, accent, type scale, spacing and radius), a
+two-column workspace — a labelled `<nav id="session-rail">` beside
+`<main id="work-panel">` holding the question, session and pending-questions
+panes — and a single-column stack below 600 px (≥44 px controls). All
+IDs, labels, `line()` wording and read-only/receipt wording are unchanged, so
+`npm test`'s DOM-level behavior tests keep passing unmodified; a new test
+pinpoints the workspace structure and tokens. No external fonts, assets,
+telemetry or storage were added; the focus/contrast/media-query rules stay in
+the stylesheet (no inline styles), and the manual browser checks in the README
+document the accessibility and narrow-screen verification.
