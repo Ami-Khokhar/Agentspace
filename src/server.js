@@ -37,6 +37,7 @@ const ALLOWED_ERROR_STATUS = {
   revisionMismatch: 409,
   receiptMismatch: 409,
   sessionHasOpenQuestion: 409,
+  badExpire: 400,
 };
 
 /** Receipts state acceptance-for-routing only; no agent adapter exists yet. */
@@ -75,6 +76,9 @@ function parseJsonBody(raw) {
 const SESSION_ID = /^session-[1-9][0-9]*$/;
 const QUESTION_ID = /^question-[1-9][0-9]*$/;
 const RECEIPT_ID = /^receipt-[1-9][0-9]*$/;
+
+/** An expired question stays expired: later replies at its coordinates are rejected. */
+const EXPIRED_NOTE = 'question expired; it stays expired and no answer can be accepted for it later';
 
 /** Matched acknowledgements for an existing receipt are accepted-for-routing only. */
 const ACKNOWLEDGED_NOTE = 'acknowledged for the exact receipt identity; this is the only delivery record the local service keeps';
@@ -240,6 +244,24 @@ function createServer({ space = createAgentSpace(), port = 0, secret = crypto.ra
     },
     {
       method: 'POST',
+      pattern: /^\/sessions\/([^/]+)\/questions\/([^/]+)\/expire$/,
+      handler: (req, res, m, body) => {
+        if (rejectBadIds(res, [[m[1], SESSION_ID], [m[2], QUESTION_ID]])) return;
+        const revision = body.revision;
+        if (!Number.isInteger(revision)) {
+          send(res, 400, { error: 'badExpire', message: 'expiry needs an integer revision' });
+          return;
+        }
+        try {
+          const result = space.expireQuestion({ sessionId: m[1], questionId: m[2], revision });
+          send(res, 200, { ...result, note: EXPIRED_NOTE });
+        } catch (err) {
+          sendError(res, err);
+        }
+      },
+    },
+    {
+      method: 'POST',
       pattern: /^\/sessions\/([^/]+)\/events$/,
       handler: (req, res, m, body) => {
         try {
@@ -319,4 +341,4 @@ function createServer({ space = createAgentSpace(), port = 0, secret = crypto.ra
   };
 }
 
-module.exports = { createServer, RECEIPT_NOTE, ACKNOWLEDGED_NOTE };
+module.exports = { createServer, RECEIPT_NOTE, ACKNOWLEDGED_NOTE, EXPIRED_NOTE };

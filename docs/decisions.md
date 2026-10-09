@@ -218,3 +218,31 @@ disconnection never implies delivery. Reconnect/replay remains out of scope:
 there is no retry, queueing or replay mechanism yet, and no agent exists to
 acknowledge anything, so the acknowledgement state only reflects what local
 callers explicitly sent.
+
+## 2026-10-09: Simulated reconnect safety: no repeated consumption, no resurrected expiration (issue #32)
+
+Context: reconnect/replay was still out of scope, so a redelivered reply or an
+acknowledgement replayed after a dropped connection had no defined behavior,
+and no question could ever be expired while its client was away.
+
+Decision: `src/agentspace.js` gains `expireQuestion` (active open question
+with an exact revision only) and `src/server.js` exposes it as
+`POST /sessions/:id/questions/:qid/expire`. An expired question keeps its
+identity but can never be answered again; expiry does not mint or touch
+receipts. `src/simulate.js` models the reconnect path explicitly:
+`reconnectSimulatedSession` replays the exact reply coordinates and receipt
+identity of what was sent before the disconnect — the duplicate reply is
+rejected (`questionNotOpen`) so one logical reply is consumed at most once,
+and the re-acknowledgement of the same identity is idempotent-equivalent (the
+same single receipt stays 'acknowledged'; nothing regresses to
+unacknowledged). `reconnectExpiredSimulatedSession` proves a question expired
+during disconnection is not resurrected and its stale answer is rejected at
+both the old coordinates and a newer revision. The HTTP-boundary tests replay
+replies, acknowledgements and events directly against the service. A
+session-level `disconnected` event stays terminal: reconnect is an HTTP
+redial, not a state resurrection.
+
+Consequence: duplicate replay can never double-consume or mint receipts,
+expiry cannot be undone by a reconnect, and the demo remains local,
+scripted and labelled. Real agents, timers, queues and persistence are still
+out of scope; a real agent adapter would reuse the same boundaries.
