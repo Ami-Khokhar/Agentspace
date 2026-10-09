@@ -223,6 +223,22 @@ function stubElement() {
   };
 }
 
+// Reply status colour rules are signalled through class selectors that must
+// not be overridden by the ID-based `#question-detail > div` child rule
+// (specificity (1,0,1) beats any (0,2,0) class rule regardless of source
+// order), so the status div is excluded by :not(.reply-status) there.
+test('reply status colours take effect over the detail child rule', () => {
+  const style = PAGE_HTML.slice(PAGE_HTML.indexOf('<style>'), PAGE_HTML.indexOf('</style>'));
+  const fallbackRule = /#question-detail > div[^\{]*\{/.exec(style)[0];
+  assert.match(fallbackRule, /:not\(\.reply-status\)/, 'status line is excluded from the secondary-colour child rule');
+  for (const state of ['pending', 'accepted', 'refused']) {
+    assert.ok(
+      new RegExp(`\\.reply-status\\.${state}\\s*\\{[^}]*var\\(--(ok|warn)\\)`).test(style),
+      `.reply-status.${state} keeps its own colour rule`
+    );
+  }
+});
+
 test('launcher: manual token entry, nothing about the token is printed, page is reachable', async () => {
   const input = new PassThrough();
   const captured = [];

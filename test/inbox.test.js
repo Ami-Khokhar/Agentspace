@@ -990,3 +990,81 @@ test('a 409 stale reply blocks resubmission until the question is refreshed and 
   assert.deepEqual(JSON.parse(sent.options.body), { revision: 3, text: 'for revision 3' }, 'only the manually refreshed submission goes out');
   assert.equal(replyCount(app), before + 1, 'no silent resend happened');
 });
+
+test('selection carries restrained entrance motion with no state change, even with reduced motion', async () => {
+  // A CSS class alone cannot report finished animation in the fake DOM, so
+  // the essential state changes — question detail lines and the composer —
+  // must exist immediately on selection, identical to the reduced-motion
+  // path where the entrance class animates nothing.
+  const app = runApp();
+  app.connect();
+  app.pending[0].resolveJson({
+    sessions: [{ sessionId: 'session-1', status: 'needs-user', hasPendingQuestion: true }],
+  });
+  await flush();
+  await selectLoadedQuestion(app, 'session-1', { sessionId: 'session-1', questionId: 'question-1', revision: 1, text: 'ready?' });
+  app.selectQuestion('question-1');
+  const detail = app.elements['question-detail'];
+  assert.equal(detail.className, 'entering', 'the panel render is tagged with the entrance class (CSS animates it, or nothing under reduced motion)');
+  assert.match(detail.textContent, /question: question-1/);
+  assert.match(detail.textContent, /session: session-1/);
+  assert.match(detail.textContent, /revision: 1/);
+  assert.match(detail.textContent, /text: ready\?/);
+  const composer = composerOf(app);
+  assert.equal(composer.sendButton.disabled, false, 'the composer is live immediately, never blocked by animation');
+});
+
+test('reply feedback transitions through honest status classes without changing the wording', async () => {
+  const app = runApp();
+  app.connect();
+  app.pending[0].resolveJson({
+    sessions: [{ sessionId: 'session-1', status: 'needs-user', hasPendingQuestion: true }],
+  });
+  await flush();
+  await selectLoadedQuestion(app, 'session-1', { sessionId: 'session-1', questionId: 'question-1', revision: 1, text: 'ready?' });
+  app.selectQuestion('question-1');
+  const { textArea, sendButton, statusLine } = composerOf(app);
+  assert.equal(statusLine.className, 'reply-status', 'the status line starts neutral');
+  textArea.value = 'the answer';
+  sendButton.trigger('click', {});
+  await flush();
+  assert.equal(statusLine.className, 'reply-status pending', 'the wait is marked pending');
+  assert.match(statusLine.textContent, /^sending reply…$/, 'the pending wording stays');
+  app.pending.findLast((p) => /\/reply$/.test(p.entry.url)).resolveRaw({ status: 202 });
+  await flush();
+  assert.equal(statusLine.className, 'reply-status accepted', 'acceptance is marked accepted');
+  assert.match(statusLine.textContent, /reply accepted for routing; no agent has received it yet/, 'accepted stays not-delivered, never acknowledged');
+});
+
+test('refusals and stale blocks get the refused feedback class with wording intact', async () => {
+  const app = runApp();
+  app.connect();
+  app.pending[0].resolveJson({
+    sessions: [{ sessionId: 'session-1', status: 'needs-user', hasPendingQuestion: true }],
+  });
+  await flush();
+  await selectLoadedQuestion(app, 'session-1', { sessionId: 'session-1', questionId: 'question-1', revision: 2, text: 'stale soon' });
+  app.selectQuestion('question-1');
+  const { textArea, sendButton, statusLine } = composerOf(app);
+  textArea.value = 'for revision 2';
+  sendButton.trigger('click', {});
+  await flush();
+  app.pending.findLast((p) => /\/reply$/.test(p.entry.url)).resolveRaw({ status: 409 });
+  await flush();
+  assert.equal(statusLine.className, 'reply-status refused', 'the stale block is marked refused');
+  assert.match(statusLine.textContent, /no longer current/);
+  assert.match(statusLine.textContent, /kept for this exact question/);
+  const staleStatus = statusLine.textContent;
+
+  // A network failure also keeps its honest wording and gets the class.
+  await selectLoadedQuestion(app, 'session-1', { sessionId: 'session-1', questionId: 'question-1', revision: 3, text: 'fresh' });
+  app.selectQuestion('question-1');
+  const fresh = composerOf(app);
+  fresh.textArea.value = 'for revision 3';
+  fresh.sendButton.trigger('click', {});
+  await flush();
+  app.pending.findLast((p) => /\/reply$/.test(p.entry.url)).rejectError(new Error('the connection was lost'));
+  await flush();
+  assert.equal(fresh.statusLine.className, 'reply-status refused', 'the network failure is marked refused');
+  assert.match(fresh.statusLine.textContent, /network error: the reply was not sent \(the connection was lost\)/);
+});
