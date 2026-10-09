@@ -166,3 +166,26 @@ has received it yet" (accepted-not-delivered); non-409 statuses are
 Consequence: no new storage, privacy or control surface — drafts live and
 die with the tab like the token; sending remains a single explicit POST per
 submission and only the server can make a question current again.
+
+## 2026-10-09: Two scripted simulated sessions over the real boundaries, no acknowledgement (issue #30)
+
+Context: simulated sessions were needed for local exercise of the reply
+routing without inventing delivery semantics, a new framework or a generic
+agent adapter.
+
+Decision: `src/simulate.js` is a compact local simulator bound to the
+boundaries that already exist. Questions are asked through the core's `ask`;
+each simulated session's own simulator reads only that session's
+`GET /sessions/:id/questions/pending`, posts its reply to the service's reply
+route, and closes the session with an explicit `finished` event through the
+events route. Every printed line is labelled `[simulated]`. `src/demo.js`
+(`npm run demo`) runs two labelled sessions with fixed scripts and a
+deterministic shutdown: both scripts finish, sessions close, the service
+closes, the process exits. Receipts remain acceptance-only
+(RECEIPT_NOTE); no acknowledgement, delivery claim or reconnect mechanism is
+introduced here.
+
+Consequence: a later real agent adapter must reuse the same boundaries and
+may only replace "simulated" labelling where a real, authenticated agent
+actually exists; acceptance wording is fixed and tests enforce that no
+`delivered`/`acknowledged` state appears.
