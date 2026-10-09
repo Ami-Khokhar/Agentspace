@@ -1,5 +1,30 @@
 # Decisions
 
+## 2026-10-09: Motion answers actions only; receipts collapse behind a labelled toggle (issue #47)
+
+Context: the precision desk needed purposeful interaction motion without
+animating every card or reading target, fake progress or layout displacement,
+and the receipts list pushed the session state far down the workspace.
+
+Decision: `src/page.js` keeps the pre-existing ≤200 ms restrained set
+(`--motion-fast` 120 ms, `--motion-panel` 160 ms, opacity/transform only, and
+the `prefers-reduced-motion: reduce` overrides) and makes motion answer three
+actions: selection marks the rendered rail rows in place — each row carries a
+`data-session-id`, and `markSelectedRow` toggles the `selected` class on the
+same elements instead of rebuilding the list, so the indicator's colour
+transition actually animates; selecting a question re-renders only the
+question panel behind the existing bounded entrance, with old content cleared
+synchronously before it runs; and each session's receipts collapse behind a
+labelled "Show/Hide reply context (n)" toggle with `aria-expanded`, whose
+reveal is the same bounded fade with the lines present before it starts.
+Nothing animates on page load, no state waits on an animation, and the
+receipt wording (accepted-not-delivered) is unchanged.
+
+Consequence: later page changes keep the in-place-selection pattern for any
+indicator (no rebuild for class-only state), scope disclosures to the
+toggle/`hidden`/`aria-expanded` pattern, and never add animated layout
+properties or durations outside the 120–200 ms budget.
+
 ## 2026-10-09: Codex integration via documented app-server stdio protocol, not terminal scraping (issue #6)
 
 Context: a first real coding-agent adapter needs structured identifiers,

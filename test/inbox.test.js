@@ -1100,3 +1100,99 @@ test('refusals and stale blocks get the refused feedback class with wording inta
   assert.equal(fresh.statusLine.className, 'reply-status refused', 'the network failure is marked refused');
   assert.match(fresh.statusLine.textContent, /network error: the reply was not sent \(the connection was lost\)/);
 });
+
+test('selection updates the rail rows in place so the selected indicator transitions on one element', async () => {
+  // The CSS .row transition only animates when the same element keeps its
+  // classes; a rebuild from renderSessionList would create fresh rows and skip
+  // the motion, so the selection must update the rendered rows in place.
+  const app = runApp();
+  app.connect();
+  app.pending[0].resolveJson({
+    sessions: [
+      { sessionId: 'session-1', status: 'working', hasPendingQuestion: false },
+      { sessionId: 'session-2', status: 'needs-user', hasPendingQuestion: true },
+    ],
+  });
+  await flush();
+  const rows = app.elements['session-list'].children;
+  const row1 = rows[0];
+  assert.equal(row1.getAttribute('data-session-id'), 'session-1', 'each rail row names its own session');
+
+  app.select('session-2');
+  app.pending[1].resolveJson({ sessionId: 'session-2', status: 'needs-user', activeQuestion: null });
+  await flush();
+  app.pending[2].resolveJson({ questions: [{ sessionId: 'session-2', questionId: 'question-2', revision: 2, text: 'Proceed?' }] });
+  await flush();
+  assert.equal(rows.length, 2, 'the rail was not rebuilt by selection');
+  assert.equal(rows[0], row1, 'selection reuses the same rendered row element');
+  assert.ok(!rows[0].className.includes('selected'), 'the deselected row loses the selected class');
+  assert.ok(rows[1].className.includes('selected'), 'the newly selected row gains the selected class');
+
+  app.select('session-1');
+  app.pending[3].resolveJson({ sessionId: 'session-1', status: 'working', activeQuestion: null });
+  await flush();
+  app.pending[4].resolveJson({ questions: [] });
+  await flush();
+  assert.equal(rows.length, 2, 'the rail stayed stable across another selection');
+  assert.ok(rows[0].className.includes('selected'), 'the indicator moves back onto its row');
+  assert.ok(!rows[1].className.includes('selected'));
+});
+
+test('the reply context collapses behind a labelled toggle and never depends on the reveal animation', async () => {
+  const app = runApp();
+  app.connect();
+  app.pending[0].resolveJson({
+    sessions: [{ sessionId: 'session-1', status: 'working', hasPendingQuestion: false }],
+  });
+  await flush();
+  app.select('session-1');
+  app.pending[1].resolveJson({
+    sessionId: 'session-1',
+    status: 'working',
+    activeQuestion: null,
+    receipts: [
+      { questionId: 'question-1', revision: 1, receiptId: 'receipt-1', status: 'acknowledged' },
+      { questionId: 'question-2', revision: 2, receiptId: 'receipt-2', status: 'unacknowledged' },
+    ],
+  });
+  await flush();
+  app.pending[2].resolveJson({ questions: [] });
+  await flush();
+  const detail = app.elements['session-detail'];
+  const toggle = detail.children.find((n) => n.tagName === 'button');
+  assert.ok(toggle, 'the receipts sit behind an explicit toggle control');
+  assert.match(toggle.textContent, /^Show reply context \(2\)$/);
+  assert.equal(toggle.getAttribute('aria-expanded'), 'false', 'the toggle announces the collapsed state');
+  const context = detail.children.find((n) => n.tagName === 'div' && n.hidden === true);
+  assert.ok(context, 'the reply context starts collapsed');
+  // The receipt lines are complete before any reveal: the (bounded) entrance
+  // animation never gates waiting for the content itself.
+  assert.match(context.textContent, /receipt receipt-1 — question question-1 revision 1 — acknowledged/);
+  assert.match(context.textContent, /receipt receipt-2 — question question-2 revision 2 — accepted, unacknowledged/);
+  assert.ok(!context.textContent.includes('delivered'), 'the collapsed context keeps the receipt wording honest');
+
+  toggle.trigger('click', {});
+  assert.equal(context.hidden, false, 'expanding answers the toggle action immediately');
+  assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+  assert.match(toggle.textContent, /^Hide reply context \(2\)$/);
+  assert.ok(context.className.includes('entering'), 'the reveal is a bounded animation, or nothing under reduced motion');
+  assert.match(context.textContent, /accepted, unacknowledged/, 'the wording is identical while revealed');
+
+  toggle.trigger('click', {});
+  assert.equal(context.hidden, true, 'collapsing answers the same toggle');
+  assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+});
+
+test('motion stays inside the 120-200ms budget and reduced motion removes every animation', () => {
+  // The page's restrained set: two pinned durations, no shimmer/fake-progress
+  // timing anywhere, and a reduced-motion override for both animated rules.
+  const style = PAGE_HTML.slice(PAGE_HTML.indexOf('<style>'), PAGE_HTML.indexOf('</style>'));
+  assert.match(style, /--motion-fast: 120ms;/);
+  assert.match(style, /--motion-panel: 160ms;/);
+  for (const duration of style.matchAll(/--motion-[\w-]+: (\d+)ms/g)) {
+    assert.ok(Number(duration[1]) >= 120 && Number(duration[1]) <= 200, 'every motion duration is within the stated 120-200ms budget');
+  }
+  const reduced = /@media \(prefers-reduced-motion: reduce\) \{([\s\S]*?)\n\}/.exec(style)[1];
+  assert.match(reduced, /\.row \{ transition: none; \}/, 'reduced motion removes the selection transition');
+  assert.match(reduced, /\.entering \{ animation: none; \}/, 'reduced motion removes every entrance animation');
+});
