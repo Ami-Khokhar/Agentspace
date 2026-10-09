@@ -191,7 +191,7 @@ button:disabled { opacity: 0.55; cursor: default; }
   flex-direction: column;
   gap: var(--space-1);
 }
-#session-detail > div, #question-detail > div, #question-list > div {
+#session-detail > div, #question-detail > div:not(.reply-status), #question-list > div {
   font-size: var(--type-sm);
   color: var(--text-secondary);
 }
