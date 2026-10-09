@@ -275,9 +275,11 @@ test('the page is a structured workspace with local design tokens, not browser-d
   }
   assert.match(PAGE_HTML, /\.row\.selected \{[\s\S]*?background: var\(--accent-muted\)/, 'selection state uses the accent token');
   // Same-token focus outline + hover/selection state so controls are not
-  // browser-default-looking. The grid must stack below 600px (responsive).
-  assert.match(PAGE_HTML, /body \{[\s\S]*?grid-template-columns: 14rem minmax\(0, 1fr\)/, 'two-column workspace layout');
-  assert.match(PAGE_HTML, /@media \(max-width: 600px\) \{[\s\S]*?grid-template-columns: minmax\(0, 1fr\)/,
+  // browser-default-looking. The workspace grid itself is on #inbox, whose
+  // direct children are exactly the rail and the work panel — a grid on
+  // <body> would not arrange them at all. It stacks below 600px.
+  assert.match(PAGE_HTML, /#inbox \{[\s\S]*?grid-template-columns: 14rem minmax\(0, 1fr\)/, 'two-column workspace layout');
+  assert.match(PAGE_HTML, /@media \(max-width: 600px\) \{[\s\S]*?#inbox \{[\s\S]*?grid-template-columns: minmax\(0, 1fr\)/,
     'workspace stacks to one column on narrow screens');
 });
 

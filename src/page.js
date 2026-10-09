@@ -69,13 +69,16 @@ body {
   max-width: 62rem;
   background: var(--surface-canvas);
   color: var(--text-primary);
+}
+#inbox {
+  /* The workspace is the two-column grid: the session rail and the work
+     panel are #inbox's direct children, so the columns hold exactly them. */
   display: grid;
   grid-template-columns: 14rem minmax(0, 1fr);
   gap: var(--space-4);
   align-items: start;
 }
 h1 {
-  grid-column: 1 / -1;
   font-size: var(--type-md);
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -90,7 +93,6 @@ h2 {
   margin: var(--space-3) 0 var(--space-2);
 }
 #signin {
-  grid-column: 1 / -1;
   background: var(--surface-panel);
   border: 1px solid var(--border-fine);
   border-radius: var(--radius);
@@ -175,8 +177,10 @@ textarea {
 #retry-reads { margin: var(--space-2) 0; }
 @media (max-width: 600px) {
   body {
-    grid-template-columns: minmax(0, 1fr);
     padding: var(--space-2);
+  }
+  #inbox {
+    grid-template-columns: minmax(0, 1fr);
   }
   .row, button, #question-detail textarea { min-height: 44px; }
   #session-rail, #work-panel { min-height: 0; }
