@@ -1,5 +1,31 @@
 # Decisions
 
+## 2026-10-09: Codex integration via documented app-server stdio protocol, not terminal scraping (issue #6)
+
+Context: a first real coding-agent adapter needs structured identifiers,
+reply routing, an approval channel and disconnect semantics from a supported
+primary source, while existing user auth must stay external to Agentspace.
+
+Decision: the integration target is OpenAI Codex's own client-integration
+surface, `codex app-server` over the documented newline-delimited JSON-RPC
+2.0 stdio transport (https://learn.chatgpt.com/docs/app-server), with
+schemas generated per Codex version via `codex app-server
+generate-json-schema`. Threads map to sessions, turns/items carry
+structured ids, `turn/steer` routes mid-turn replies, and command/file
+approvals arrive as typed server-initiated JSON-RPC requests — so approvals
+are surfaced as pending questions, never inferred from terminal text. Herdr
+is evaluated as optional human-view/restore glue, not the transport: its
+agent surface is terminal-scoped and offers no structured approval path.
+Safety rules are recorded in `docs/integration-codex.md` §9 (no permission
+bypass, no auto-approval, no credential collection, no worker control
+outside guarded tools), and the live acceptance procedure and its
+not-yet-exercised credential/host requirement are in its §10.
+
+Consequence: no adapter or npm dependency ships yet; the app-server command
+is documented as experimental (stdio is its stable default transport), so a
+future adapter must be opt-in and labelled. Existing Codex auth stays in
+the user's `CODEX_HOME`, never read or stored by Agentspace.
+
 ## 2026-10-08: Session-scoped pending questions with question identity (issue #19)
 
 Context: after selecting a session, the operator needs that session's pending
