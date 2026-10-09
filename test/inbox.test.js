@@ -692,6 +692,25 @@ test('session and question text rendered by the script is inert, not markup', as
   });
 });
 
+test('question identity lines carry the monospace identity class in the DOM', async () => {
+  // The .identity rule only styles nodes the script actually classes; a
+  // stylesheet grep alone cannot catch a discarded class argument.
+  const app = runApp();
+  app.connect();
+  app.pending[0].resolveJson({
+    sessions: [{ sessionId: 'session-1', status: 'needs-user', hasPendingQuestion: true }],
+  });
+  await flush();
+  await selectLoadedQuestion(app, 'session-1', { sessionId: 'session-1', questionId: 'question-1', revision: 3, text: 'ready?' });
+  app.selectQuestion('question-1');
+  const identityLines = app.elements['question-detail'].children.filter(
+    (n) => n.tagName === 'div' && n.className === 'identity'
+  );
+  const texts = identityLines.map((n) => n.textContent);
+  assert.ok(texts.some((t) => t === 'question: question-1'), `the question id line is monospaced, got: ${texts}`);
+  assert.ok(texts.some((t) => t === 'revision: 3'), `the revision line is monospaced, got: ${texts}`);
+});
+
 function selectLoadedQuestion(app, session, question) {
   app.select(session);
   // findLast: if the same read was made before (an earlier composer test

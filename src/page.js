@@ -315,9 +315,11 @@ const PAGE_JS = `'use strict';
   function el(id) { return document.getElementById(id); }
 
   // All dynamic content is added as a new node whose textContent is set:
-  // labels from the service are inert data, never markup.
-  function line(parent, text) {
+  // labels from the service are inert data, never markup. An optional class
+  // attaches the styling (e.g. monospaced identifiers) to that exact node.
+  function line(parent, text, className) {
     var node = document.createElement('div');
+    if (className) node.className = className;
     node.textContent = String(text);
     parent.appendChild(node);
     return node;
