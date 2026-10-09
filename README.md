@@ -28,7 +28,9 @@ questions with explicit reply routing. Dependency-free Node.js core.
   (for example while its client was disconnected). An expired question stays
   expired: it leaves the pending list, is never resurrected, and any answer
   replayed at its former coordinates (or against a newer revision) is
-  rejected before any state changes.
+  rejected before any state changes. On a terminal session (`finished` or
+  `disconnected`) expiry is rejected with `sessionClosed` — a closed session
+  stays closed, so expiry cannot resurrect it into a live one.
 - `sendEvent(sessionId, { type })` — explicit state events only: `working`,
   `needs-user`, `finished`, `disconnected`. `finished`/`disconnected` close the
   session to further asks and replies. Unknown or malformed events are rejected

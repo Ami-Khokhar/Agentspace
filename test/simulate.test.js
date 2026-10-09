@@ -344,6 +344,31 @@ test('a question expired during disconnection stays expired: no resurrection, no
   }
 });
 
+test('expiry on a terminal session is rejected over HTTP: no resurrected session, no later asks', async () => {
+  const { space, service, client } = await startService();
+  try {
+    const s = space.createSession();
+    const q = space.ask(s.sessionId, 'Still pending?');
+    const finished = await client.post(`/sessions/${s.sessionId}/events`, { type: 'finished' });
+    assert.equal(finished.status, 200);
+    const expired = await client.post(`/sessions/${s.sessionId}/questions/${q.questionId}/expire`, { revision: q.revision });
+    assert.equal(expired.status, 409);
+    assert.equal(expired.body.error, 'sessionClosed');
+    // The terminal session was not resurrected: a later reply at the still-open
+    // question's coordinates is rejected like any other action on a closed session.
+    const lateReply = await client.post(
+      `/sessions/${s.sessionId}/questions/${q.questionId}/reply`,
+      { revision: q.revision, text: 'Too late?' }
+    );
+    assert.equal(lateReply.status, 409);
+    assert.equal(lateReply.body.error, 'sessionClosed');
+    assert.equal(space.getSessionState(s.sessionId).status, 'finished');
+    assert.equal(space.getSessionState(s.sessionId).activeQuestion.status, 'open');
+  } finally {
+    await service.close();
+  }
+});
+
 test('demo populates two labelled simulated sessions with deterministic shutdown', async () => {
   const written = [];
   const output = { write: (line) => written.push(line.replace(/\n$/, '')) };

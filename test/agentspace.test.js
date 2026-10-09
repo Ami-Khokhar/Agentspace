@@ -85,6 +85,23 @@ test('reply to closed session is rejected', () => {
   assert.equal(space.getSessionState(session.sessionId).status, 'finished');
 });
 
+test('expiry on a closed session is rejected: the session stays closed', () => {
+  const space = createAgentSpace();
+  // Finished and disconnected are each terminal; each gets its own session
+  // because one terminal event already closes a session to further events.
+  for (const terminal of ['finished', 'disconnected']) {
+    const session = space.createSession();
+    const question = space.ask(session.sessionId, 'q?');
+    space.sendEvent(session.sessionId, { type: terminal });
+    assert.equal(
+      errorCode(() => space.expireQuestion({ sessionId: session.sessionId, questionId: question.questionId, revision: question.revision })),
+      ERRORS.sessionClosed
+    );
+    // The terminal state is not resurrected into a live one.
+    assert.equal(space.getSessionState(session.sessionId).status, terminal);
+  }
+});
+
 test('repeated submission is rejected without duplicate side effects', () => {
   const space = createAgentSpace();
   const session = space.createSession();

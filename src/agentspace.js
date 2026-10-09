@@ -165,6 +165,9 @@ function createAgentSpace() {
       fail(ERRORS.revisionMismatch, `revision must be an integer, got ${revision}`);
     }
     const session = getSession(sessionId);
+    // A closed session stays closed: expiry on a terminal session must not
+    // resurrect it into a live one, so this check runs before any state change.
+    assertOpen(session);
     if (!questionId || !session.questions.has(questionId)) {
       fail(ERRORS.unknownQuestion, `session ${session.id} has no question ${questionId}`);
     }
