@@ -35,17 +35,160 @@ const PAGE_HTML = `<!doctype html>
 <title>Agentspace (local)</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-body { font-family: system-ui, sans-serif; margin: 1rem; max-width: 60rem; }
-#session-list > div, #question-list > div { padding: 0.4rem 0.5rem; }
-.row { border: 1px solid #bbb; border-radius: 4px; margin: 0.25rem 0; cursor: pointer; }
-:focus-visible { outline: 3px solid #0a66c2; outline-offset: 2px; }
-.row.selected { border-color: #0a66c2; background: #eef5fc; }
-#retry-reads { margin: 0.25rem 0 0.75rem; }
-label { display: block; margin-bottom: 0.25rem; }
-button { font: inherit; padding: 0.35rem 0.8rem; min-height: 44px; }
+:root {
+  --surface-canvas: #1b1d20;
+  --surface-panel: #24272b;
+  --surface-inset: #2c3035;
+  --raised: #34383e;
+  --border-fine: #3a3f45;
+  --border-strong: #4a5057;
+  --text-primary: #e8eaed;
+  --text-secondary: #a3a8ae;
+  --accent: #7fa8d9;
+  --accent-muted: rgba(127, 168, 217, 0.14);
+  --ok: #8fbf8f;
+  --warn: #d9b36f;
+  --space-1: 0.375rem;
+  --space-2: 0.625rem;
+  --space-3: 1rem;
+  --space-4: 1.5rem;
+  --radius: 8px;
+  --type-xs: 0.78rem;
+  --type-sm: 0.85rem;
+  --type-base: 0.95rem;
+  --type-md: 1.05rem;
+  --type-lg: 1.2rem;
+}
+* { box-sizing: border-box; }
+/* Author rules like #inbox { display: grid } would otherwise beat the UA
+   stylesheet's [hidden] { display: none } and show the app from page load,
+   before any token sign-in; this explicit override keeps the attribute
+   authoritative no matter which display rule targets the element. */
+[hidden] { display: none !important; }
+body {
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: var(--type-base);
+  line-height: 1.55;
+  margin: 0;
+  padding: var(--space-4);
+  max-width: 62rem;
+  background: var(--surface-canvas);
+  color: var(--text-primary);
+}
+#inbox {
+  /* The workspace is the two-column grid: the session rail and the work
+     panel are #inbox's direct children, so the columns hold exactly them. */
+  display: grid;
+  grid-template-columns: 14rem minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+h1 {
+  font-size: var(--type-md);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin: 0 0 var(--space-1);
+  color: var(--text-secondary);
+}
+h2 {
+  font-size: var(--type-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  margin: var(--space-3) 0 var(--space-2);
+}
+#signin {
+  background: var(--surface-panel);
+  border: 1px solid var(--border-fine);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+}
+label {
+  display: block;
+  font-size: var(--type-sm);
+  color: var(--text-secondary);
+  margin-bottom: var(--space-1);
+}
+input {
+  font: inherit;
+  color: var(--text-primary);
+  background: var(--surface-inset);
+  border: 1px solid var(--border-fine);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-3);
+}
+button {
+  font: inherit;
+  color: var(--text-primary);
+  background: var(--raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-3);
+  min-height: 44px;
+  cursor: pointer;
+}
+button[type="submit"], #question-detail button[type="button"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #11181f;
+  font-weight: 600;
+}
+button:disabled { opacity: 0.55; cursor: default; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+#session-rail { display: flex; flex-direction: column; min-width: 0; }
+#session-list { display: flex; flex-direction: column; gap: 2px; }
+.row {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-fine);
+  border-radius: var(--radius);
+  background: var(--surface-panel);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.row:hover { border-color: var(--border-strong); }
+.row.selected {
+  border-color: var(--accent);
+  background: var(--accent-muted);
+}
+#work-panel {
+  min-width: 0;
+  background: var(--surface-panel);
+  border: 1px solid var(--border-fine);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4) var(--space-4);
+}
+#session-detail, #question-detail, #question-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+#session-detail > div, #question-detail > div, #question-list > div {
+  font-size: var(--type-sm);
+  color: var(--text-secondary);
+}
+#session-rail > div, #session-detail > div:first-child, #question-detail > div:first-child {
+  color: var(--text-primary);
+}
+textarea {
+  font: inherit;
+  color: var(--text-primary);
+  background: var(--surface-inset);
+  border: 1px solid var(--border-fine);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-3);
+  min-height: 6rem;
+  resize: vertical;
+}
+#retry-reads { margin: var(--space-2) 0; }
 @media (max-width: 600px) {
-  body { margin: 0.5rem; }
-  #session-list > div, #question-list > div { padding: 0.75rem 0.5rem; }
+  body {
+    padding: var(--space-2);
+  }
+  #inbox {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .row, button, #question-detail textarea { min-height: 44px; }
+  #session-rail, #work-panel { min-height: 0; }
 }
 </style>
 </head>
@@ -56,18 +199,22 @@ button { font: inherit; padding: 0.35rem 0.8rem; min-height: 44px; }
   <input id="token" type="password" autocomplete="off" required>
   <button type="submit">Connect</button>
 </form>
-<p id="status" role="status"></p>
+<div id="status" role="status"></div>
 <section id="inbox" hidden>
-  <h2>Sessions</h2>
-  <button id="reload-sessions" type="button">Reload sessions</button>
-  <div id="session-list"></div>
-  <h2>Selected session</h2>
-  <div id="session-detail"></div>
-  <button id="retry-reads" type="button">Retry latest read</button>
-  <h2>Pending questions</h2>
-  <div id="question-list"></div>
-  <h2>Selected question</h2>
-  <div id="question-detail"></div>
+  <nav id="session-rail" aria-label="Sessions">
+    <h2>Sessions</h2>
+    <button id="reload-sessions" type="button">Reload sessions</button>
+    <div id="session-list"></div>
+  </nav>
+  <main id="work-panel">
+    <h2>Question</h2>
+    <div id="question-detail"></div>
+    <h2>Selected session</h2>
+    <div id="session-detail"></div>
+    <button id="retry-reads" type="button">Retry latest read</button>
+    <h2>Pending questions</h2>
+    <div id="question-list"></div>
+  </main>
 </section>
 <script src="/app.js"></script>
 </body>

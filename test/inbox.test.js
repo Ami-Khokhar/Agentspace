@@ -261,6 +261,36 @@ test('the page exposes labelled controls, visible-focus and narrow-screen CSS', 
   assert.ok(!PAGE_HTML.includes('style='), 'styling stays in the stylesheet, not inline attributes');
 });
 
+test('the stylesheet keeps [hidden] authoritative over any author display rule', async () => {
+  // #inbox { display: grid } would otherwise beat the UA stylesheet's
+  // [hidden] { display: none } and the workspace would render on the
+  // sign-in screen, issuing unauthenticated reads before connect().
+  assert.match(PAGE_HTML, /\[hidden\] \{ display: none !important; \}/,
+    'an author-level [hidden] override backs the hidden attribute');
+});
+
+test('the page is a structured workspace with local design tokens, not browser-default chrome', async () => {
+  // Stable session navigation beside a focused workspace; the session rail is
+  // labelled navigation, and the detail panes live in one workspace region.
+  assert.match(PAGE_HTML, /<nav id="session-rail" aria-label="Sessions">/);
+  assert.match(PAGE_HTML, /<main id="work-panel">/);
+  assert.match(PAGE_HTML, /<div id="question-detail"><\/div>[\s\S]*<div id="session-detail"><\/div>/,
+    'question and session panes are separated in the workspace');
+  // Design tokens are explicit CSS custom properties: charcoal surfaces, one
+  // restrained accent, a type scale, spacing, borders and a selection state.
+  for (const token of ['--surface-canvas', '--surface-panel', '--accent:', '--type-base', '--space-3:']) {
+    assert.ok(PAGE_HTML.includes('  ' + token), `stylesheet defines ${token}`);
+  }
+  assert.match(PAGE_HTML, /\.row\.selected \{[\s\S]*?background: var\(--accent-muted\)/, 'selection state uses the accent token');
+  // Same-token focus outline + hover/selection state so controls are not
+  // browser-default-looking. The workspace grid itself is on #inbox, whose
+  // direct children are exactly the rail and the work panel — a grid on
+  // <body> would not arrange them at all. It stacks below 600px.
+  assert.match(PAGE_HTML, /#inbox \{[\s\S]*?grid-template-columns: 14rem minmax\(0, 1fr\)/, 'two-column workspace layout');
+  assert.match(PAGE_HTML, /@media \(max-width: 600px\) \{[\s\S]*?#inbox \{[\s\S]*?grid-template-columns: minmax\(0, 1fr\)/,
+    'workspace stacks to one column on narrow screens');
+});
+
 test('a failed session-list label survives a later successful selection read and the list itself can recover', async () => {
   const app = runApp();
   app.connect();

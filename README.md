@@ -181,9 +181,12 @@ After a successful token sign-in, the page's `app.js` shows a read-only inbox:
 - Accessibility basics: session and pending-question rows are labelled
   controls (`role="button"`, an `aria-label` naming the session/question and
   status, focusable with `tabindex="0"`) that respond to Enter and Space as
-  well as click; the sign-in token field has a real `<label>`; the stylesheet
-  gives every control a visible `:focus-visible` outline; rows and buttons
-  enlarge at `max-width: 600px` so the page stays usable on narrow screens.
+  well as click; the sign-in token field has a real `<label>`; the session
+  rail is a labelled `<nav>`; the stylesheet gives every control a visible
+  `:focus-visible` outline and the text/token colors are chosen for contrast
+  on the charcoal surfaces; below 600 px the workspace stacks into a single
+  column and rows and buttons grow to ≥44 px so the page stays usable on
+  narrow screens.
 - There is no reply editing beyond one submission at a time: the composer is
   sent as-is by the button. Draft preservation, stale-revision blocking and
   honest failure wording are described below.
@@ -216,6 +219,11 @@ The `npm test` run above exercises the served script against controlled
 responses, but it does **not** perform the following browser checks — none of
 them were executed by automated tooling, and no claim below is a test result:
 
+0. Before signing in: only the sign-in form and the status line are visible —
+   no Sessions, Question or Pending questions region, and no activated
+   "Reload sessions" or "Retry latest read" button (the workspace `<section>`
+   stays hidden until `connect()` succeeds; the stylesheet's `[hidden]`
+   override keeps the attribute authoritative).
 1. `npm start`, open the printed loopback address, type the local token and
    press Enter. Expected: the sign-in form has a visible text label, and after
    connecting the session list loads.
@@ -231,8 +239,10 @@ them were executed by automated tooling, and no claim below is a test result:
    never shows another session's content — it is labelled and can be retied
    with "Retry latest read" or by selecting the row again.
 4. Mobile width: in the browser's responsive mode, narrow the window below
-   600 px. Expected: rows and buttons grow taller (≥44 px touch targets) and
-   the layout stays single-column with no horizontal scrolling.
+   600 px. Expected: the two-column workspace (session rail beside the
+   question/session panels) stacks into one column, rows and buttons grow
+   taller (≥44 px touch targets), and the layout stays single-column with no
+   horizontal scrolling.
 5. Drafts and stale handling (requires a second ask in a session, e.g. via the
    events/question endpoints from a second local terminal): type a reply for a
    question, switch to another session and back — the draft text is restored
