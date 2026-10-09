@@ -60,6 +60,27 @@ See `docs/decisions.md`.
 - The launcher then prints only the loopback page address (no token in it) and
   starts the service below; the page's form takes the token into memory.
 
+## Local simulated sessions demo
+
+`npm run demo` (or `node src/demo.js`) runs a fully local, deterministic demo
+of two simulated sessions against the real service and core boundaries:
+
+- Two scripted simulated sessions (`[simulated] pair-a`, `[simulated] pair-b`)
+  are created by the core; every output line is explicitly labelled
+  `[simulated]`, so none of it can be mistaken for live agent traffic.
+- Questions are asked through the core's `ask`; each session's owning
+  simulator reads only that session's own pending list
+  (`GET /sessions/:id/questions/pending`) over the real HTTP service and
+  posts its reply to the service's reply route. A simulator cannot see or
+  answer another session's question.
+- Reply receipts are acceptance-only (`acceptance for routing by the local
+  service; no agent has received or acknowledged this input`): nothing here
+  claims delivery or acknowledgement, and no acknowledgement or reconnect
+  mechanism exists.
+- Each session is closed with an explicit `finished` event through the
+  events route; the service is then closed and the demo exits. All local,
+  loopback only, no network, no credentials, no command execution.
+
 ## Local page inbox (read-only)
 
 After a successful token sign-in, the page's `app.js` shows a read-only inbox:
