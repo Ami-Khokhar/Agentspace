@@ -187,6 +187,18 @@ After a successful token sign-in, the page's `app.js` shows a read-only inbox:
   on the slate frame and rail surfaces; below 700 px the desk stacks into a
   single column and rows and buttons grow to ≥44 px so the page stays usable
   on narrow screens (down to 390 px widths).
+- Motion answers actions only (no page-load entrance, no ambient shimmer,
+  no fake progress): selecting a session marks the already-rendered rail rows
+  in place (a `data-session-id` on each row), so the selected indicator's
+  colour transition runs on the same element each time; selecting a question
+  re-renders only the question panel with a bounded ≤200 ms fade-in
+  (`--motion-fast` 120 ms, `--motion-panel` 160 ms, opacity/transform only —
+  no reading target shifts), with the panel content cleared and correct
+  before any animation runs; each session's receipts sit collapsed behind a
+  labelled "Show reply context (n)" toggle (`aria-expanded`), whose reveal is
+  the same bounded fade — the receipt lines are present before it starts and
+  collapse is instant; `prefers-reduced-motion: reduce` removes every
+  transition and animation, and no state ever waits on an animation.
 - There is no reply editing beyond one submission at a time: the composer is
   sent as-is by the button. Draft preservation, stale-revision blocking and
   honest failure wording are described below.
@@ -253,15 +265,20 @@ them were executed by automated tooling, and no claim below is a test result:
    pending questions) and pick the refreshed question.
 
 6. Motion (workspace transitions, restrained by design): select a session and
-   a question. Expected: the selection highlight and hover/focus border
-   change over a short (≤200 ms) transition; the question panel fades in from
-   a 4 px offset over ~160 ms while showing only the currently selected
-   question's lines — no old session's content is ever displayed, and text
-   positions of reading targets do not shift. With the browser's
+   a question. Expected: the rail rows stay in place and the selected
+   indicator's colours change on the same row over a short (≤200 ms)
+   transition; the question panel fades in from a 4 px offset over ~160 ms
+   while showing only the currently selected question's lines — no old
+   session's content is ever displayed, and text positions of reading targets
+   do not shift. Select a session with receipts: a "Show reply context (n)"
+   toggle is collapsed; expanding reveals the receipt lines immediately
+   behind a ~160 ms bounded fade (no height animation, nothing else reflows),
+   collapsing is instant, and the toggle is announced with `aria-expanded`.
+   With the browser's
    "emulate prefers-reduced-motion: reduce" setting enabled: expected is the
    same content with no transition or entrance animation — every state change
-   (selection colours, loading lines, reply status wording) applies instantly
-   with no functional dependency on animation.
+   (selection colours, loading lines, reply status wording, context reveal)
+   applies instantly with no functional dependency on animation.
 7. Reply feedback: submit a reply. Expected: the status line reads
    "sending reply…" (pending), then "reply accepted for routing; no agent has
    received it yet" (accepted, explicitly not delivered, never agent
@@ -271,8 +288,8 @@ them were executed by automated tooling, and no claim below is a test result:
 8. Mobile width (motion included): in the browser's responsive mode, narrow
    the window below 700 px. Expected: the stacked single-column layout with
    ≥44 px touch targets behaves as on desktop — the same restrained
-   transitions, the same panel entrance scoped to the new selection, and
-   reduced-motion still removes all animation.
+   transitions, the same panel entrance scoped to the new selection, the same
+   collapsed reply context, and reduced-motion still removes all animation.
 
 The page uses no external assets, storage or network beyond its own loopback
 service, and the token stays in memory and in the `Authorization` header only.
@@ -280,9 +297,15 @@ service, and the token stays in memory and in the `Authorization` header only.
 The automated `npm test` run above **does** verify against the actual
 implementation: the entrance class is applied to the question panel render
 with the panel's lines and live composer present immediately (state is never
-waited on animation, the reduced-motion path renders identically), and reply
-statuses move through `pending`/`accepted`/`refused` feedback classes with
-exact wording unchanged. It does **not** execute the browser checks 1–8
+waited on animation, the reduced-motion path renders identically), selection
+marks the rendered rail rows in place instead of rebuilding them (so the
+indicator transition has a stable element to animate), the reply context
+starts collapsed behind a labelled, `aria-expanded` toggle whose lines are
+present regardless of the reveal animation, and reply statuses move through
+`pending`/`accepted`/`refused` feedback classes with exact wording unchanged.
+The stylesheet's two motion durations are pinned inside the 120–200 ms budget
+and a reduced-motion rule removes the row transition and every entrance
+animation. It does **not** execute the browser checks 1–8
 above; none of them were performed by automated tooling and no claim in them
 is a test result.
 

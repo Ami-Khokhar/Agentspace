@@ -56,10 +56,12 @@ const PAGE_HTML = `<!doctype html>
   --space-3: 1rem;
   --space-4: 1.5rem;
   --radius: 8px;
-  /* Restrained motion only: every transition is under 200ms and touches no
-     layout property, so reading targets never shift while an animation runs. */
-  --motion-fast: 120ms;
-  --motion-panel: 160ms;
+/* Restrained motion only: every transition is under 200ms and touches no
+   layout property, so reading targets never shift while an animation runs.
+   Motion answers actions only — selection, panel entry and the reply-context
+   reveal — and never runs on page load or as ambient progress. */
+   --motion-fast: 120ms;
+   --motion-panel: 160ms;
 }
 * { box-sizing: border-box; }
 /* Author rules like #desk { display: grid } would otherwise beat the UA
@@ -371,6 +373,9 @@ const PAGE_JS = `'use strict';
     sessions.forEach(function (session) {
       var row = document.createElement('div');
       row.className = 'row' + (selectedSessionId === session.sessionId ? ' selected' : '');
+      // Names its own session so a selection can mark the rendered rows in
+      // place instead of rebuilding them (see markSelectedRow).
+      row.setAttribute('data-session-id', session.sessionId);
       // The id and the explicit status from the API are inert text here.
       line(row, session.sessionId + ' — status: ' + session.status);
       row.tabIndex = 0;
@@ -414,6 +419,23 @@ const PAGE_JS = `'use strict';
       row.addEventListener('click', function () { selectQuestion(listGeneration, question); });
       list.appendChild(row);
     });
+  }
+
+  /**
+   * Selection marks the already-rendered rail rows in place, so the
+   * selected-state colours transition on the same element (a full re-render
+   * would create fresh rows and skip the transition). Rows without a
+   * data-session-id (a failure label line) are left untouched. A session id
+   * that is not on the rail leaves every row unmarked, as a re-render would.
+   */
+  function markSelectedRow(sessionId) {
+    var rows = el('session-list').children;
+    for (var i = 0; i < rows.length; i += 1) {
+      var row = rows[i];
+      var rowId = typeof row.getAttribute === 'function' ? row.getAttribute('data-session-id') : null;
+      if (rowId === null) continue;
+      row.className = 'row' + (rowId === sessionId ? ' selected' : '');
+    }
   }
 
   /**
@@ -611,7 +633,7 @@ const PAGE_JS = `'use strict';
       .then(function (state) {
         if (gen !== selectionGeneration || selectedSessionId !== sessionId) return;
         renderSession(state);
-        renderSessionList();
+        markSelectedRow(sessionId);
         // Pending questions are read under the same generation, so any
         // response for an earlier selection is discarded, not rendered.
         return fetch('/sessions/' + encodeURIComponent(sessionId) + '/questions/pending', authHeaders())
@@ -645,6 +667,14 @@ const PAGE_JS = `'use strict';
       });
   }
 
+  /**
+   * The receipts are the session's reply context: complete in the DOM but
+   * collapsed behind an explicit labelled toggle, expanded in place. The
+   * reveal is bounded (the shared ≤160ms entrance, or nothing under reduced
+   * motion) and nothing depends on it: the lines are already present when the
+   * hidden flag flips, and collapse is instant. The per-receipt wording stays
+   * exactly as before — accepted is never delivered.
+   */
   function renderSession(state) {
     var detail = el('session-detail');
     detail.textContent = '';
@@ -653,8 +683,25 @@ const PAGE_JS = `'use strict';
     line(detail, state.activeQuestion
       ? 'open question: ' + state.activeQuestion.text + ' (revision ' + state.activeQuestion.revision + ')'
       : 'no open question');
-    (state.receipts || []).forEach(function (receipt) {
-      line(detail, 'receipt ' + receipt.receiptId + ' — question ' + receipt.questionId + ' revision ' + receipt.revision
+    var receipts = state.receipts || [];
+    if (receipts.length === 0) return;
+    var toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.textContent = 'Show reply context (' + receipts.length + ')';
+    toggle.setAttribute('aria-expanded', 'false');
+    var context = document.createElement('div');
+    context.hidden = true;
+    function setExpanded(open) {
+      context.hidden = !open;
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      toggle.textContent = (open ? 'Hide' : 'Show') + ' reply context (' + receipts.length + ')';
+      context.className = open ? 'reply-context entering' : 'reply-context';
+    }
+    toggle.addEventListener('click', function () { setExpanded(context.hidden); });
+    detail.appendChild(toggle);
+    detail.appendChild(context);
+    receipts.forEach(function (receipt) {
+      line(context, 'receipt ' + receipt.receiptId + ' — question ' + receipt.questionId + ' revision ' + receipt.revision
         + ' — ' + (receipt.status === 'acknowledged' ? 'acknowledged' : 'accepted, unacknowledged (no agent acknowledgement)'));
     });
   }
