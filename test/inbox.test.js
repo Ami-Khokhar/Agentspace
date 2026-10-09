@@ -314,6 +314,34 @@ function flush() {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
+test('session detail distinguishes accepted/unacknowledged from acknowledged receipts', async () => {
+  const app = runApp();
+  app.connect();
+  app.pending[0].resolveJson({
+    sessions: [{ sessionId: 'session-1', status: 'working', hasPendingQuestion: false }],
+  });
+  await flush();
+  app.select('session-1');
+  app.pending[1].resolveJson({
+    sessionId: 'session-1',
+    status: 'working',
+    activeQuestion: null,
+    // The service's exact receipts shape, in both states.
+    receipts: [
+      { questionId: 'question-1', revision: 1, receiptId: 'receipt-1', status: 'acknowledged' },
+      { questionId: 'question-2', revision: 2, receiptId: 'receipt-2', status: 'unacknowledged' },
+    ],
+  });
+  await flush();
+  app.pending[2].resolveJson({ questions: [] });
+  await flush();
+  const detail = app.elements['session-detail'].textContent;
+  assert.match(detail, /receipt receipt-1 — question question-1 revision 1 — acknowledged/);
+  // The unacknowledged receipt never reads as delivered or acknowledged.
+  assert.match(detail, /receipt receipt-2 — question question-2 revision 2 — accepted, unacknowledged/);
+  assert.ok(!detail.includes('delivered'));
+});
+
 test('two sessions are listed with explicit statuses and either can be selected', async () => {
   const app = runApp();
   app.connect();

@@ -91,23 +91,116 @@ test('acceptance alone never produces delivered or acknowledged state', async ()
     // The receipt names acceptance-for-routing only.
     assert.equal(receipt.body.note, RECEIPT_NOTE);
     assert.equal(receipt.body.delivered, undefined);
-    assert.equal(receipt.body.acknowledged, undefined);
+    // The new receipt is explicitly unacknowledged: accepted, never claimed delivered.
+    assert.equal(receipt.body.receipt.status, 'unacknowledged');
+    assert.match(receipt.body.receipt.receiptId, /^receipt-[1-9][0-9]*$/);
 
-    // No session state named delivered or acknowledged exists, and the
-    // explicit events route never accepts any such state.
+    // Session state names the receipt with its honest unacknowledged status,
+    // and no reply state anywhere claims delivery or acknowledgement.
     const states = [await client.get(`/sessions/${s.sessionId}`), await client.get('/sessions')];
     for (const read of states) {
       assert.equal(JSON.stringify(read.body).includes('delivered'), false);
-      assert.equal(JSON.stringify(read.body).includes('acknowledged'), false);
     }
+    const state = space.getSessionState(s.sessionId);
+    assert.deepEqual(state.receipts, [
+      { questionId: q.questionId, revision: q.revision, receiptId: receipt.body.receipt.receiptId, status: 'unacknowledged' },
+    ]);
     const bogus = await client.post(`/sessions/${s.sessionId}/events`, { type: 'acknowledged' });
     assert.equal(bogus.status, 400);
     assert.equal(bogus.body.error, 'badEvent');
-    const state = space.getSessionState(s.sessionId);
     assert.equal(state.status, 'working');
     assert.equal(state.activeQuestion, null);
     await finishSimulatedSession(client, s.sessionId);
     assert.equal((await client.get(`/sessions/${s.sessionId}`)).body.status, 'finished');
+    // Even after finishing, the unacknowledged receipt stays unacknowledged:
+    // no event state implies delivery or acknowledgement.
+    assert.equal(space.getSessionState(s.sessionId).receipts[0].status, 'unacknowledged');
+  } finally {
+    await service.close();
+  }
+});
+
+test('only the owning simulator matching acknowledgement changes the receipt state', async () => {
+  const { space, service, client } = await startService();
+  try {
+    // Two sessions with one accepted reply each, so unrelated state must stay intact.
+    const a = space.createSession();
+    const b = space.createSession();
+    const qa = space.ask(a.sessionId, 'A?');
+    const qb = space.ask(b.sessionId, 'B?');
+    const ra = await client.post(`/sessions/${a.sessionId}/questions/${qa.questionId}/reply`, { revision: qa.revision, text: 'A.' });
+    const rb = await client.post(`/sessions/${b.sessionId}/questions/${qb.questionId}/reply`, { revision: qb.revision, text: 'B.' });
+    assert.equal(ra.status, 202); assert.equal(rb.status, 202);
+    const receiptA = ra.body.receipt.receiptId;
+    const receiptB = rb.body.receipt.receiptId;
+    const ackPathA = `/sessions/${a.sessionId}/questions/${qa.questionId}/acknowledge`;
+
+    // Every mismatched acknowledgement is rejected: wrong receipt id, wrong
+    // session, wrong question, wrong revision.
+    const wrongReceipt = await client.post(ackPathA, { revision: qa.revision, receiptId: receiptB });
+    assert.equal(wrongReceipt.status, 409);
+    assert.equal(wrongReceipt.body.error, 'receiptMismatch');
+    const wrongSession = await client.post(`/sessions/${b.sessionId}/questions/${qa.questionId}/acknowledge`, { revision: qa.revision, receiptId: receiptA });
+    assert.equal(wrongSession.status, 404);
+    assert.equal(wrongSession.body.error, 'unknownQuestion');
+    const wrongQuestion = await client.post(`/sessions/${a.sessionId}/questions/${qb.questionId}/acknowledge`, { revision: qa.revision, receiptId: receiptA });
+    assert.equal(wrongQuestion.status, 404);
+    const wrongRevision = await client.post(ackPathA, { revision: qa.revision + 999, receiptId: receiptA });
+    assert.equal(wrongRevision.status, 409);
+    assert.equal(wrongRevision.body.error, 'revisionMismatch');
+    const malformed = await client.post(ackPathA, { revision: qa.revision, receiptId: 'receipt-nope' });
+    assert.equal(malformed.status, 400);
+    assert.equal(malformed.body.error, 'badAcknowledge');
+
+    // None of the failures above changed either receipt's state.
+    assert.deepEqual(space.getSessionState(a.sessionId).receipts, [
+      { questionId: qa.questionId, revision: qa.revision, receiptId: receiptA, status: 'unacknowledged' },
+    ]);
+    assert.deepEqual(space.getSessionState(b.sessionId).receipts, [
+      { questionId: qb.questionId, revision: qb.revision, receiptId: receiptB, status: 'unacknowledged' },
+    ]);
+
+    // The exact matching acknowledgement (owning session, own question, own
+    // revision, own receipt id) is the only thing that changes the state.
+    const matched = await client.post(ackPathA, { revision: qa.revision, receiptId: receiptA });
+    assert.equal(matched.status, 200);
+    assert.equal(matched.body.receiptStatus, 'acknowledged');
+    assert.deepEqual(space.getSessionState(a.sessionId).receipts, [
+      { questionId: qa.questionId, revision: qa.revision, receiptId: receiptA, status: 'acknowledged' },
+    ]);
+    assert.deepEqual(space.getSessionState(b.sessionId).receipts, [
+      { questionId: qb.questionId, revision: qb.revision, receiptId: receiptB, status: 'unacknowledged' },
+    ]);
+  } finally {
+    await service.close();
+  }
+});
+
+test('a disconnected session accepted reply stays unacknowledged: disconnection never implies delivery', async () => {
+  const { space, service, client } = await startService();
+  try {
+    const s = space.createSession();
+    const q = space.ask(s.sessionId, 'Still there?');
+    const receipt = await client.post(`/sessions/${s.sessionId}/questions/${q.questionId}/reply`, { revision: q.revision, text: 'Simulated answer.' });
+    assert.equal(receipt.status, 202);
+    // The simulator disconnects (explicit event) without acknowledging; nothing reports delivered.
+    const disconnected = await client.post(`/sessions/${s.sessionId}/events`, { type: 'disconnected' });
+    assert.equal(disconnected.status, 200);
+    assert.equal(disconnected.body.status, 'disconnected');
+    const read = await client.get(`/sessions/${s.sessionId}`);
+    assert.equal(JSON.stringify(read.body).includes('delivered'), false);
+    assert.deepEqual(space.getSessionState(s.sessionId).receipts, [
+      { questionId: q.questionId, revision: q.revision, receiptId: receipt.body.receipt.receiptId, status: 'unacknowledged' },
+    ]);
+    // Disconnection also closes the acknowledgement path: a later
+    // acknowledgement cannot rewrite history after the fact.
+    const lateAck = await client.post(
+      `/sessions/${s.sessionId}/questions/${q.questionId}/acknowledge`,
+      { revision: q.revision, receiptId: receipt.body.receipt.receiptId }
+    );
+    assert.equal(lateAck.status, 409);
+    assert.equal(lateAck.body.error, 'sessionClosed');
+    assert.equal(space.getSessionState(s.sessionId).receipts[0].status, 'unacknowledged');
   } finally {
     await service.close();
   }
@@ -124,6 +217,8 @@ test('demo populates two labelled simulated sessions with deterministic shutdown
   const summary = written.filter((l) => /: finished \[simulated\]/.test(l));
   assert.equal(summary.length, 2);
   assert.deepEqual(space.listSessions().map((s) => s.status), ['finished', 'finished']);
-  assert.ok(written.some((l) => l.includes('not delivered, not acknowledged')));
+  assert.ok(written.some((l) => l.includes('accepted, unacknowledged')));
+  assert.ok(written.some((l) => l.includes('acknowledged receipt receipt-')));
+  assert.ok(written.some((l) => l.includes('acknowledged by the simulated agents')));
   assert.ok(written[written.length - 1] === 'Demo finished deterministically');
 });

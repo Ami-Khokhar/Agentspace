@@ -31,6 +31,7 @@ const ERRORS = {
   unknownQuestion: 'unknownQuestion',
   questionNotOpen: 'questionNotOpen',
   revisionMismatch: 'revisionMismatch',
+  receiptMismatch: 'receiptMismatch',
   badEvent: 'badEvent',
   sessionHasOpenQuestion: 'sessionHasOpenQuestion',
 };
@@ -138,9 +139,48 @@ function createAgentSpace() {
       fail(ERRORS.questionNotOpen, `question ${questionId} is not the active question of session ${session.id}`);
     }
     question.status = 'answered';
+    // The input has only been accepted for routing: the receipt exists and
+    // is explicitly unacknowledged until an acknowledgement exactly matches
+    // its identity (session, question, revision, receipt id).
+    question.receipt = { id: newId('receipt'), status: 'unacknowledged' };
     session.activeQuestionId = null;
     session.status = 'working';
-    return { sessionId: session.id, questionId: question.id, status: question.status };
+    return {
+      sessionId: session.id,
+      questionId: question.id,
+      status: question.status,
+      receiptId: question.receipt.id,
+      receiptStatus: question.receipt.status,
+    };
+  }
+
+  /**
+   * Acknowledge the delivery of an accepted reply's input. Only an exact
+   * match of session, question, revision and receipt id — the existing
+   * receipt identity — changes the receipt to 'acknowledged'; anything else
+   * is rejected before any state changes.
+   */
+  function acknowledge({ sessionId, questionId, revision, receiptId }) {
+    if (!Number.isInteger(revision)) {
+      fail(ERRORS.revisionMismatch, `revision must be an integer, got ${revision}`);
+    }
+    if (typeof receiptId !== 'string' || receiptId.length === 0) {
+      fail(ERRORS.receiptMismatch, `receipt id must be a non-empty string, got ${JSON.stringify(receiptId)}`);
+    }
+    const session = getSession(sessionId);
+    assertOpen(session);
+    if (!questionId || !session.questions.has(questionId)) {
+      fail(ERRORS.unknownQuestion, `session ${session.id} has no question ${questionId}`);
+    }
+    const question = session.questions.get(questionId);
+    if (!question.receipt || question.receipt.id !== receiptId) {
+      fail(ERRORS.receiptMismatch, `no receipt ${receiptId} for question ${questionId} of session ${session.id}`);
+    }
+    if (question.revision !== revision) {
+      fail(ERRORS.revisionMismatch, `question ${questionId} is at revision ${question.revision}, acknowledgement targeted ${revision}`);
+    }
+    question.receipt.status = 'acknowledged';
+    return { sessionId: session.id, questionId: question.id, receiptId, receiptStatus: 'acknowledged' };
   }
 
   /**
@@ -172,6 +212,11 @@ function createAgentSpace() {
       activeQuestion: active
         ? { questionId: active.id, revision: active.revision, text: active.text, status: active.status }
         : null,
+      // Reply receipts with their delivery state, so callers can tell
+      // accepted-only ('unacknowledged') apart from 'acknowledged'.
+      receipts: [...session.questions.values()]
+        .filter((q) => q.receipt)
+        .map((q) => ({ questionId: q.id, revision: q.revision, receiptId: q.receipt.id, status: q.receipt.status })),
     };
   }
 
@@ -206,7 +251,7 @@ function createAgentSpace() {
     return out;
   }
 
-  return { createSession, ask, reply, sendEvent, getSessionState, listSessions, listPendingQuestions };
+  return { createSession, ask, reply, acknowledge, sendEvent, getSessionState, listSessions, listPendingQuestions };
 }
 
 module.exports = { createAgentSpace, AgentSpaceError, ERRORS, STATE_EVENT_TYPES, TERMINAL_STATES };
