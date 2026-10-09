@@ -60,6 +60,11 @@ const PAGE_HTML = `<!doctype html>
   --type-lg: 1.2rem;
 }
 * { box-sizing: border-box; }
+/* Author rules like #inbox { display: grid } would otherwise beat the UA
+   stylesheet's [hidden] { display: none } and show the app from page load,
+   before any token sign-in; this explicit override keeps the attribute
+   authoritative no matter which display rule targets the element. */
+[hidden] { display: none !important; }
 body {
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   font-size: var(--type-base);

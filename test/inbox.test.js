@@ -261,6 +261,14 @@ test('the page exposes labelled controls, visible-focus and narrow-screen CSS', 
   assert.ok(!PAGE_HTML.includes('style='), 'styling stays in the stylesheet, not inline attributes');
 });
 
+test('the stylesheet keeps [hidden] authoritative over any author display rule', async () => {
+  // #inbox { display: grid } would otherwise beat the UA stylesheet's
+  // [hidden] { display: none } and the workspace would render on the
+  // sign-in screen, issuing unauthenticated reads before connect().
+  assert.match(PAGE_HTML, /\[hidden\] \{ display: none !important; \}/,
+    'an author-level [hidden] override backs the hidden attribute');
+});
+
 test('the page is a structured workspace with local design tokens, not browser-default chrome', async () => {
   // Stable session navigation beside a focused workspace; the session rail is
   // labelled navigation, and the detail panes live in one workspace region.

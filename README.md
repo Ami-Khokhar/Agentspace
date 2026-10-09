@@ -219,6 +219,11 @@ The `npm test` run above exercises the served script against controlled
 responses, but it does **not** perform the following browser checks — none of
 them were executed by automated tooling, and no claim below is a test result:
 
+0. Before signing in: only the sign-in form and the status line are visible —
+   no Sessions, Question or Pending questions region, and no activated
+   "Reload sessions" or "Retry latest read" button (the workspace `<section>`
+   stays hidden until `connect()` succeeds; the stylesheet's `[hidden]`
+   override keeps the attribute authoritative).
 1. `npm start`, open the printed loopback address, type the local token and
    press Enter. Expected: the sign-in form has a visible text label, and after
    connecting the session list loads.
