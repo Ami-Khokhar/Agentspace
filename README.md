@@ -3,6 +3,11 @@
 Local-first commercial prototype (not a production release): sessions and
 questions with explicit reply routing. Dependency-free Node.js core.
 
+A real-agent integration path (Codex via the Codex app-server protocol) is
+specified with primary-source evidence in
+[`docs/integration-codex.md`](docs/integration-codex.md); no adapter ships
+yet.
+
 ## API
 
 `createAgentSpace()` returns an in-memory store with:
