@@ -184,9 +184,9 @@ After a successful token sign-in, the page's `app.js` shows a read-only inbox:
   well as click; the sign-in token field has a real `<label>`; the session
   rail is a labelled `<nav>`; the stylesheet gives every control a visible
   `:focus-visible` outline and the text/token colors are chosen for contrast
-  on the charcoal surfaces; below 600 px the workspace stacks into a single
-  column and rows and buttons grow to ≥44 px so the page stays usable on
-  narrow screens.
+  on the slate frame and rail surfaces; below 700 px the desk stacks into a
+  single column and rows and buttons grow to ≥44 px so the page stays usable
+  on narrow screens (down to 390 px widths).
 - There is no reply editing beyond one submission at a time: the composer is
   sent as-is by the button. Draft preservation, stale-revision blocking and
   honest failure wording are described below.
@@ -239,7 +239,7 @@ them were executed by automated tooling, and no claim below is a test result:
    never shows another session's content — it is labelled and can be retied
    with "Retry latest read" or by selecting the row again.
 4. Mobile width: in the browser's responsive mode, narrow the window below
-   600 px. Expected: the two-column workspace (session rail beside the
+   700 px. Expected: the two-column workspace (session rail beside the
    question/session panels) stacks into one column, rows and buttons grow
    taller (≥44 px touch targets), and the layout stays single-column with no
    horizontal scrolling.
@@ -269,7 +269,7 @@ them were executed by automated tooling, and no claim below is a test result:
    refusal text. No spinner, shimmer, scroll-dependent control or fake
    progress appears at any point; waits are named in text only.
 8. Mobile width (motion included): in the browser's responsive mode, narrow
-   the window below 600 px. Expected: the stacked single-column layout with
+   the window below 700 px. Expected: the stacked single-column layout with
    ≥44 px touch targets behaves as on desktop — the same restrained
    transitions, the same panel entrance scoped to the new selection, and
    reduced-motion still removes all animation.
