@@ -11,9 +11,18 @@ questions with explicit reply routing. Dependency-free Node.js core.
 - `ask(sessionId, text)` → `{ sessionId, questionId, revision, status: 'open' }`.
   Asking supersedes the previous open question (marks it `stale`) and sets the
   session status to `needs-user`.
-- `reply({ sessionId, questionId, revision, text })` → `{ ... status: 'answered' }`.
+- `reply({ sessionId, questionId, revision, text })` → `{ ..., status: 'answered', receiptId, receiptStatus: 'unacknowledged' }`.
   A reply must name the exact session, the exact active question and its exact
-  current revision; anything else is rejected before any state changes.
+  current revision; anything else is rejected before any state changes. Each
+  accepted reply gets a receipt bound to its exact question identity.
+- `acknowledge({ sessionId, questionId, revision, receiptId })` →
+  `{ ..., receiptStatus: 'acknowledged' }`. Only an exact match of session,
+  question, revision and receipt id changes a receipt to 'acknowledged'; any
+  mismatch is rejected before any state changes. Receipt states are
+  'unacknowledged' (accepted for routing only, never a delivery claim) and
+  'acknowledged'. Closed sessions (`finished`/`disconnected`) reject
+  acknowledgements, so disconnection never implies delivery; receipt states
+  stay readable in `getSessionState`.
 - `sendEvent(sessionId, { type })` — explicit state events only: `working`,
   `needs-user`, `finished`, `disconnected`. `finished`/`disconnected` close the
   session to further asks and replies. Unknown or malformed events are rejected
@@ -21,7 +30,7 @@ questions with explicit reply routing. Dependency-free Node.js core.
 
 Errors are `AgentSpaceError` instances distinguished by `name`: `badEvent`,
 `unknownSession`, `sessionClosed`, `unknownQuestion`, `questionNotOpen`,
-`revisionMismatch`.
+`revisionMismatch`, `receiptMismatch`.
 
 Question revisions increment per session (1, 2, 3, …), so a superseded question's
 revision is stale by definition and cannot be replied to.
@@ -35,8 +44,8 @@ Executed evidence (Node v24.21.0, npm 11.19.0):
 
 ```
 $ npm test
-ℹ tests 41
-ℹ pass 41
+ℹ tests 47
+ℹ pass 47
 ℹ fail 0
 ```
 
@@ -73,10 +82,14 @@ of two simulated sessions against the real service and core boundaries:
   (`GET /sessions/:id/questions/pending`) over the real HTTP service and
   posts its reply to the service's reply route. A simulator cannot see or
   answer another session's question.
-- Reply receipts are acceptance-only (`acceptance for routing by the local
-  service; no agent has received or acknowledged this input`): nothing here
-  claims delivery or acknowledgement, and no acknowledgement or reconnect
-  mechanism exists.
+- Reply receipts are acceptance-only at the moment of submission
+  (`acceptance for routing by the local service; no agent has received or
+  acknowledged this input`): nothing here claims delivery. Each accepted
+  reply carries a receipt bound to the exact question identity, which the
+  owning simulator then acknowledges (exactly matching session,
+  question/revision/receipt id) through the service's acknowledgement route,
+  so the demo distinguishes accepted, unacknowledged and acknowledged
+  states. No reconnect or replay mechanism exists.
 - Each session is closed with an explicit `finished` event through the
   events route; the service is then closed and the demo exits. All local,
   loopback only, no network, no credentials, no command execution.

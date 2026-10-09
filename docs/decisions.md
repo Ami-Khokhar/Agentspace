@@ -189,3 +189,32 @@ Consequence: a later real agent adapter must reuse the same boundaries and
 may only replace "simulated" labelling where a real, authenticated agent
 actually exists; acceptance wording is fixed and tests enforce that no
 `delivered`/`acknowledged` state appears.
+
+## 2026-10-09: Explicit matching acknowledgements bound to receipt identity (issue #31)
+
+Context: accepted replies still said nothing about delivery; a disconnect
+could not be distinguished from a delivered-but-unacknowledged input.
+
+Decision: every accepted reply in `src/agentspace.js` mints a receipt
+(`receipt-N`) on the answered question with status 'unacknowledged', and
+`src/server.js` exposes an acknowledgement route
+(`POST /sessions/:id/questions/:qid/acknowledge`, body `{ revision,
+receiptId }`). Delivery is recorded only by an acknowledgement that exactly
+matches the session, question, revision and existing receipt id; any other
+combination (wrong receipt id, mismatched question/revision, unknown or
+closed session) is rejected with `receiptMismatch`/`unknownQuestion`/
+`revisionMismatch`/`sessionClosed` before any state changes, and unrelated
+receipts are never touched. `getSessionState` now lists receipts with their
+status, and the page renders 'acknowledged' vs 'accepted, unacknowledged'
+per receipt. The simulated sessions in `src/simulate.js` acknowledge their
+own accepted receipts exactly once, with the exact receipt identity from the
+202. Terminal sessions reject acknowledgements, so a `finished` or
+`disconnected` simulator can never rewrite history; an accepted reply there
+stays 'unacknowledged'.
+
+Consequence: acceptance, unacknowledged and acknowledged states are now
+explicitly distinguishable through the service and the page, and
+disconnection never implies delivery. Reconnect/replay remains out of scope:
+there is no retry, queueing or replay mechanism yet, and no agent exists to
+acknowledge anything, so the acknowledgement state only reflects what local
+callers explicitly sent.

@@ -35,6 +35,7 @@ const ALLOWED_ERROR_STATUS = {
   unknownQuestion: 404,
   questionNotOpen: 409,
   revisionMismatch: 409,
+  receiptMismatch: 409,
   sessionHasOpenQuestion: 409,
 };
 
@@ -73,6 +74,10 @@ function parseJsonBody(raw) {
 
 const SESSION_ID = /^session-[1-9][0-9]*$/;
 const QUESTION_ID = /^question-[1-9][0-9]*$/;
+const RECEIPT_ID = /^receipt-[1-9][0-9]*$/;
+
+/** Matched acknowledgements for an existing receipt are accepted-for-routing only. */
+const ACKNOWLEDGED_NOTE = 'acknowledged for the exact receipt identity; this is the only delivery record the local service keeps';
 
 
 function createServer({ space = createAgentSpace(), port = 0, secret = crypto.randomBytes(32).toString('base64url') } = {}) {
@@ -208,7 +213,26 @@ function createServer({ space = createAgentSpace(), port = 0, secret = crypto.ra
         }
         try {
           space.reply({ sessionId: m[1], questionId: m[2], revision, text: body.text });
-          send(res, 202, { accepted: true, note: RECEIPT_NOTE });
+          const receipt = space.getSessionState(m[1]).receipts.find((r) => r.questionId === m[2]);
+          send(res, 202, { accepted: true, note: RECEIPT_NOTE, receipt });
+        } catch (err) {
+          sendError(res, err);
+        }
+      },
+    },
+    {
+      method: 'POST',
+      pattern: /^\/sessions\/([^/]+)\/questions\/([^/]+)\/acknowledge$/,
+      handler: (req, res, m, body) => {
+        if (rejectBadIds(res, [[m[1], SESSION_ID], [m[2], QUESTION_ID]])) return;
+        const revision = body.revision;
+        if (!Number.isInteger(revision) || !RECEIPT_ID.test(String(body.receiptId || ''))) {
+          send(res, 400, { error: 'badAcknowledge', message: 'acknowledgement needs an integer revision and a receipt id' });
+          return;
+        }
+        try {
+          const result = space.acknowledge({ sessionId: m[1], questionId: m[2], revision, receiptId: body.receiptId });
+          send(res, 200, { ...result, note: ACKNOWLEDGED_NOTE });
         } catch (err) {
           sendError(res, err);
         }
@@ -295,4 +319,4 @@ function createServer({ space = createAgentSpace(), port = 0, secret = crypto.ra
   };
 }
 
-module.exports = { createServer, RECEIPT_NOTE };
+module.exports = { createServer, RECEIPT_NOTE, ACKNOWLEDGED_NOTE };

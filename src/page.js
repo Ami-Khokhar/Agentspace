@@ -22,7 +22,10 @@
  * the pending questions are re-read and the refreshed question is selected;
  * nothing is resent against a newer revision silently. A 202 receipt is
  * worded as acceptance for routing — accepted, explicitly not delivered —
- * never as agent acknowledgement.
+ * never as agent acknowledgement. Each reply carries a receipt bound to the
+ * exact question identity; a receipt shows 'accepted, unacknowledged' until
+ * an acknowledgement matching the exact session/question/revision/receipt
+ * identity arrives, and an acknowledged receipt is labelled '#acknowledged'.
  */
 
 const PAGE_HTML = `<!doctype html>
@@ -426,6 +429,10 @@ const PAGE_JS = `'use strict';
     line(detail, state.activeQuestion
       ? 'open question: ' + state.activeQuestion.text + ' (revision ' + state.activeQuestion.revision + ')'
       : 'no open question');
+    (state.receipts || []).forEach(function (receipt) {
+      line(detail, 'receipt ' + receipt.receiptId + ' — question ' + receipt.questionId + ' revision ' + receipt.revision
+        + ' — ' + (receipt.status === 'acknowledged' ? 'acknowledged' : 'accepted, unacknowledged (no agent acknowledgement)'));
+    });
   }
 
   function connect(event) {

@@ -5,8 +5,10 @@
  * real local HTTP service. Nothing here connects outward: the service binds
  * to the loopback interface, questions are asked through the core, and both
  * simulated agents reply through the service's own receipts/events routes.
- * Shutdown is deterministic: both scripts finish, both sessions are closed
- * with explicit events, the server is closed, and the demo exits 0.
+ * Shutdown is deterministic: both scripts finish (each accepted reply is
+ * acknowledged by the session's own simulator with the exact receipt), both
+ * sessions are closed with explicit events, the server is closed, and the
+ * demo exits 0.
  */
 
 const crypto = require('node:crypto');
@@ -49,7 +51,7 @@ async function runDemo({ port = 0, output = process.stdout } = {}) {
   await finishSimulatedSession(client, a.sessionId);
   await finishSimulatedSession(client, b.sessionId);
   for (const session of space.listSessions()) {
-    log(`${session.sessionId}: ${session.status} ${SIMULATED_LABEL} (receipts were acceptance-only; nothing was delivered or acknowledged)`);
+    log(`${session.sessionId}: ${session.status} ${SIMULATED_LABEL} (receipts were acknowledged by the simulated agents; nothing beyond the local service was touched)`);
   }
   await service.close();
   log('Demo finished deterministically');
