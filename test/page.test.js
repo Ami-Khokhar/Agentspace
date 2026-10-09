@@ -132,7 +132,7 @@ test('served page script keeps the token in memory and sends it only as Authoriz
     const signin = stubElement();
     const tokenInput = stubElement();
     const status = stubElement();
-    const inbox = stubElement();
+    const desk = stubElement();
     const reloadSessions = stubElement();
     const retryReads = stubElement();
     const sessionList = stubElement();
@@ -145,7 +145,7 @@ test('served page script keeps the token in memory and sends it only as Authoriz
             signin,
             token: tokenInput,
             status,
-            inbox,
+            desk,
             'reload-sessions': reloadSessions,
             'retry-reads': retryReads,
             'session-list': sessionList,

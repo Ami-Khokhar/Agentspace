@@ -66,7 +66,7 @@ class FakeElement {
 
 function runApp() {
   const elements = {};
-  const ids = ['signin', 'token', 'status', 'inbox', 'reload-sessions', 'retry-reads', 'session-list', 'session-detail', 'question-list', 'question-detail'];
+  const ids = ['signin', 'token', 'status', 'desk', 'reload-sessions', 'retry-reads', 'session-list', 'session-detail', 'question-list', 'question-detail'];
   for (const id of ids) elements[id] = new FakeElement('div');
   const document = {
     getElementById: (id) => elements[id] || null,
@@ -256,7 +256,7 @@ test('the page exposes labelled controls, visible-focus and narrow-screen CSS', 
   // Visible keyboard focus and a narrow-screen adjustment are in the page,
   // not left to unreliable browser defaults.
   assert.match(PAGE_HTML, /:focus-visible \{ outline: 3px solid/);
-  assert.match(PAGE_HTML, /@media \(max-width: 600px\)/);
+  assert.match(PAGE_HTML, /@media \(max-width: 700px\)/);
   // No inline one-off styles that could unbalance the stylesheet.
   assert.ok(!PAGE_HTML.includes('style='), 'styling stays in the stylesheet, not inline attributes');
 });
@@ -269,26 +269,39 @@ test('the stylesheet keeps [hidden] authoritative over any author display rule',
     'an author-level [hidden] override backs the hidden attribute');
 });
 
-test('the page is a structured workspace with local design tokens, not browser-default chrome', async () => {
-  // Stable session navigation beside a focused workspace; the session rail is
-  // labelled navigation, and the detail panes live in one workspace region.
+test('the page is a precision desk: slate frame, session rail, one pale question workspace', async () => {
+  // Compact left-aligned header, a stable 220px session rail as labelled
+  // navigation, and one pale focal question workspace beside it.
+  assert.match(PAGE_HTML, /<header id="desk-head">/);
   assert.match(PAGE_HTML, /<nav id="session-rail" aria-label="Sessions">/);
   assert.match(PAGE_HTML, /<main id="work-panel">/);
   assert.match(PAGE_HTML, /<div id="question-detail"><\/div>[\s\S]*<div id="session-detail"><\/div>/,
-    'question and session panes are separated in the workspace');
-  // Design tokens are explicit CSS custom properties: charcoal surfaces, one
-  // restrained accent, a type scale, spacing, borders and a selection state.
-  for (const token of ['--surface-canvas', '--surface-panel', '--accent:', '--type-base', '--space-3:']) {
-    assert.ok(PAGE_HTML.includes('  ' + token), `stylesheet defines ${token}`);
+    'question and session panes stay separated in the workspace');
+  // The six desk colour tokens are explicit CSS custom properties on :root.
+  for (const token of ['--frame:', '--rail:', '--question-surface:', '--ink:', '--ink-secondary:', '--action:']) {
+    assert.ok(PAGE_HTML.includes('  ' + token), `stylesheet defines the desk token ${token}`);
   }
-  assert.match(PAGE_HTML, /\.row\.selected \{[\s\S]*?background: var\(--accent-muted\)/, 'selection state uses the accent token');
+  // The type scale is pinned in px, not named loosely.
+  for (const size of ['--type-xs: 13px', '--type-base: 15px', '--type-lead: 20px', '--type-display: 28px']) {
+    assert.ok(PAGE_HTML.includes(size + ';'), `type scale defines ${size}`);
+  }
+  // The frame paints the viewport; the pale surface paints the workspace.
+  assert.match(PAGE_HTML, /body \{[\s\S]*?background: var\(--frame\)/);
+  assert.match(PAGE_HTML, /#work-panel \{[\s\S]*?background: var\(--question-surface\)/);
   // Same-token focus outline + hover/selection state so controls are not
-  // browser-default-looking. The workspace grid itself is on #inbox, whose
-  // direct children are exactly the rail and the work panel — a grid on
-  // <body> would not arrange them at all. It stacks below 600px.
-  assert.match(PAGE_HTML, /#inbox \{[\s\S]*?grid-template-columns: 14rem minmax\(0, 1fr\)/, 'two-column workspace layout');
-  assert.match(PAGE_HTML, /@media \(max-width: 600px\) \{[\s\S]*?#inbox \{[\s\S]*?grid-template-columns: minmax\(0, 1fr\)/,
-    'workspace stacks to one column on narrow screens');
+  // browser-default-looking. The desk grid's direct children are exactly the
+  // rail and the work panel — a grid on <body> would not arrange them at all.
+  assert.match(PAGE_HTML, /#desk \{[\s\S]*?grid-template-columns: 220px minmax\(0, 1fr\)/,
+    'stable 220px session rail beside the question workspace');
+  assert.match(PAGE_HTML, /@media \(max-width: 700px\) \{[\s\S]*?#desk \{[\s\S]*?grid-template-columns: minmax\(0, 1fr\)/,
+    'workspace stacks to one column on narrow screens (390px widths included)');
+  // Sentence-case labels: no all-caps decoration anywhere in the stylesheet.
+  assert.ok(!PAGE_HTML.includes('uppercase'), 'no all-caps labels on the desk');
+  // Real question content leads the pane in display type.
+  assert.match(PAGE_HTML, /\.question-text \{[\s\S]*?font-size: var\(--type-display\)/,
+    'the question text is the display-size focal line');
+  // Monospace is scoped to identifiers only, not prose.
+  assert.match(PAGE_HTML, /\.identity \{[\s\S]*?ui-monospace/);
 });
 
 test('a failed session-list label survives a later successful selection read and the list itself can recover', async () => {

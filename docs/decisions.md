@@ -273,6 +273,35 @@ expiry cannot be undone by a reconnect, and the demo remains local,
 scripted and labelled. Real agents, timers, queues and persistence are still
 out of scope; a real agent adapter would reuse the same boundaries.
 
+## 2026-10-09: Precision desk: pale focal question surface in a slate frame (issue #46, supersedes issue #41's charcoal panel identity)
+
+Context: the owner asked for a genuinely new composition built on the merged
+real UI (Anthropic frontend-design guidance), not a reskin of the preceding
+uniform charcoal panel layout, and for the plan and self-critique to be
+recorded before coding.
+
+Decision: `src/page.js` keeps every application ID (now under a `#desk`
+section), API-read wiring, route, receipt, draft and honest-wording behavior —
+only the fixed HTML head/stylesheet and the question pane's emphasis classes
+changed. The desk is: a slate frame (`--frame #202D3A`) filling the viewport;
+a stable 220px session rail (`--rail #293B4B`); and the one memorable pale
+focal surface (`--question-surface #F5F7FA`) for the question workspace,
+holding question text first in display type (`--ink #172638`, 28px), exact
+identifiers in monospace, secondary metadata (`--ink-secondary #58697A`), and
+a single `--action #265CD8` for the primary control, selection and focus.
+Typography is the local system sans at a pinned 13/15/20/28 px scale with a
+≤72-character measure (`max-width: 72ch`); no all-caps labels, gradients,
+card wall or fake counts; motion stays the pre-existing ≤200ms restrained set.
+Below 700 px the rail stacks above the workspace (390 px widths included) with
+≥44 px touch targets. The design plan and self-critique were recorded in
+`src/design-plan.md` before coding and deleted once shipped; this entry is
+the surviving record.
+
+Consequence: later page changes keep the frame/rail/pale-question-surface
+composition and the six colour tokens instead of introducing a new palette,
+and any new pane must live inside the pale workspace (or take its own
+explicitly justified surface), with monospace reserved for actual identifiers.
+
 ## 2026-10-09: Premium workspace identity from local CSS tokens only (issue #41)
 
 Context: the local page asked for a structured, premium visual identity

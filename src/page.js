@@ -36,121 +36,105 @@ const PAGE_HTML = `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
 :root {
-  --surface-canvas: #1b1d20;
-  --surface-panel: #24272b;
-  --surface-inset: #2c3035;
-  --raised: #34383e;
-  --border-fine: #3a3f45;
-  --border-strong: #4a5057;
-  --text-primary: #e8eaed;
-  --text-secondary: #a3a8ae;
-  --accent: #7fa8d9;
-  --accent-muted: rgba(127, 168, 217, 0.14);
-  --ok: #8fbf8f;
-  --warn: #d9b36f;
+  /* Six colour tokens of the precision desk: one pale focal surface on a
+     slate frame — no gradients, no card wall, no all-caps labelling. */
+  --frame: #202D3A;
+  --rail: #293B4B;
+  --question-surface: #F5F7FA;
+  --ink: #172638;
+  --ink-secondary: #58697A;
+  --action: #265CD8;
+  --ok: #1e6b45;
+  --warn: #8a4b00;
+  /* Local system sans (SF system where available), 13/15/20/28 px scale. */
+  --type-xs: 13px;
+  --type-base: 15px;
+  --type-lead: 20px;
+  --type-display: 28px;
   --space-1: 0.375rem;
   --space-2: 0.625rem;
   --space-3: 1rem;
   --space-4: 1.5rem;
   --radius: 8px;
-  --type-xs: 0.78rem;
-  --type-sm: 0.85rem;
-  --type-base: 0.95rem;
-  --type-md: 1.05rem;
-  --type-lg: 1.2rem;
   /* Restrained motion only: every transition is under 200ms and touches no
      layout property, so reading targets never shift while an animation runs. */
   --motion-fast: 120ms;
   --motion-panel: 160ms;
 }
 * { box-sizing: border-box; }
-/* Author rules like #inbox { display: grid } would otherwise beat the UA
+/* Author rules like #desk { display: grid } would otherwise beat the UA
    stylesheet's [hidden] { display: none } and show the app from page load,
    before any token sign-in; this explicit override keeps the attribute
    authoritative no matter which display rule targets the element. */
 [hidden] { display: none !important; }
 body {
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: ui-sans-serif, -apple-system, system-ui, "Segoe UI", sans-serif;
   font-size: var(--type-base);
   line-height: 1.55;
   margin: 0;
-  padding: var(--space-4);
-  max-width: 62rem;
-  background: var(--surface-canvas);
-  color: var(--text-primary);
+  background: var(--frame);
+  color: var(--question-surface);
 }
-#inbox {
-  /* The workspace is the two-column grid: the session rail and the work
-     panel are #inbox's direct children, so the columns hold exactly them. */
-  display: grid;
-  grid-template-columns: 14rem minmax(0, 1fr);
-  gap: var(--space-4);
-  align-items: start;
+/* Left-aligned compact header: the frame's quiet masthead, not a hero band. */
+#desk-head { padding: var(--space-3) var(--space-4) var(--space-1); }
+#desk-head h1 {
+  font-size: var(--type-lead);
+  font-weight: 600;
+  margin: 0;
+  color: var(--question-surface);
 }
-h1 {
-  font-size: var(--type-md);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  margin: 0 0 var(--space-1);
-  color: var(--text-secondary);
-}
-h2 {
-  font-size: var(--type-sm);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-secondary);
-  margin: var(--space-3) 0 var(--space-2);
-}
-#signin {
-  background: var(--surface-panel);
-  border: 1px solid var(--border-fine);
-  border-radius: var(--radius);
-  padding: var(--space-3) var(--space-4);
-}
-label {
+#desk-head .desk-tag {
   display: block;
-  font-size: var(--type-sm);
-  color: var(--text-secondary);
+  font-size: var(--type-xs);
+  color: var(--ink-secondary);
+}
+#signin { padding: var(--space-2) var(--space-4) 0; max-width: 24rem; }
+#signin label {
+  display: block;
+  font-size: var(--type-xs);
+  color: var(--question-surface);
   margin-bottom: var(--space-1);
 }
-input {
+#signin input {
   font: inherit;
-  color: var(--text-primary);
-  background: var(--surface-inset);
-  border: 1px solid var(--border-fine);
+  color: var(--ink);
+  background: var(--question-surface);
+  border: 1px solid var(--rail);
   border-radius: var(--radius);
   padding: var(--space-2) var(--space-3);
 }
-button {
-  font: inherit;
-  color: var(--text-primary);
-  background: var(--raised);
-  border: 1px solid var(--border-strong);
+#signin button { margin-top: var(--space-2); }
+#desk {
+  /* The desk is the two-column grid: the stable 220px session rail and the
+     pale question workspace are #desk's direct children, so the columns
+     hold exactly them. */
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: stretch;
+  padding: var(--space-3) var(--space-4) var(--space-4);
+}
+/* Question workspace: the one memorable pale focal surface of the desk. */
+#work-panel {
+  min-width: 0;
+  background: var(--question-surface);
+  color: var(--ink);
   border-radius: var(--radius);
-  padding: var(--space-2) var(--space-3);
-  min-height: 44px;
-  cursor: pointer;
+  padding: var(--space-3) var(--space-4) var(--space-4);
 }
-button[type="submit"], #question-detail button[type="button"] {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #11181f;
-  font-weight: 600;
-}
-button:disabled { opacity: 0.55; cursor: default; }
-:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+/* Session rail records: quiet identifiers on the deeper slate. */
+#session-rail { display: flex; flex-direction: column; min-width: 0; }
+#session-list { display: flex; flex-direction: column; gap: 2px; }
 .row {
   transition: border-color var(--motion-fast) ease-out, background-color var(--motion-fast) ease-out;
 }
 /* Selection colours change instantly only where reduced motion removes the
    transition; the colors themselves never depend on animation. */
-.row:focus-visible { border-color: var(--accent); }
+.row:focus-visible { border-color: var(--action); }
 /* Subtle panel entrance tied to the current selection: content is already
    correct before the animation starts, it only fades/slides in from a small
    offset — never from, or through, another session's content. */
-.entering {
-  animation: panel-enter var(--motion-panel) ease-out;
-}
+.entering { animation: panel-enter var(--motion-panel) ease-out; }
 @keyframes panel-enter {
   from { opacity: 0.4; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
@@ -164,72 +148,122 @@ button:disabled { opacity: 0.55; cursor: default; }
   .row { transition: none; }
   .entering { animation: none; }
 }
-#session-rail { display: flex; flex-direction: column; min-width: 0; }
-#session-list { display: flex; flex-direction: column; gap: 2px; }
-.row {
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border-fine);
+/* Rail rows sit directly on the rail surface — list records, not cards. */
+#session-list .row {
+  padding: var(--space-2);
+  border: 1px solid transparent;
   border-radius: var(--radius);
-  background: var(--surface-panel);
-  color: var(--text-primary);
-  cursor: pointer;
+  background: transparent;
+  color: var(--question-surface);
 }
-.row:hover { border-color: var(--border-strong); }
-.row.selected {
-  border-color: var(--accent);
-  background: var(--accent-muted);
+#session-list .row:hover { border-color: var(--ink-secondary); }
+#session-list .row.selected {
+  border-color: var(--action);
+  background: rgba(38, 92, 216, 0.3);
+  color: var(--question-surface);
 }
-#work-panel {
-  min-width: 0;
-  background: var(--surface-panel);
-  border: 1px solid var(--border-fine);
-  border-radius: var(--radius);
-  padding: var(--space-3) var(--space-4) var(--space-4);
+h2 {
+  font-size: var(--type-xs);
+  font-weight: 600;
+  color: var(--ink-secondary);
+  margin: var(--space-3) 0 var(--space-2);
 }
-#session-detail, #question-detail, #question-list {
+#question-detail, #session-detail, #question-list {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
 }
-#session-detail > div, #question-detail > div:not(.reply-status), #question-list > div {
-  font-size: var(--type-sm);
-  color: var(--text-secondary);
+/* The real question text leads the pale surface, in display type; body copy
+   in it reads at most 72 characters. */
+.question-text {
+  font-size: var(--type-display);
+  line-height: 1.25;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  max-width: 72ch;
 }
-#session-rail > div, #session-detail > div:first-child, #question-detail > div:first-child {
-  color: var(--text-primary);
+/* Monospace only for actual identifiers (question id, revision), never prose. */
+.identity {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--type-xs);
+}
+#question-detail > div:not(.reply-status):not(.question-text), #session-detail > div, #question-list > div {
+  font-size: var(--type-xs);
+  color: var(--ink-secondary);
+  max-width: 72ch;
+}
+/* Pending-question rows are quiet records on the pale surface, not cards. */
+#work-panel .row {
+  padding: var(--space-2);
+  border: 1px solid #DCE3EB;
+  border-radius: var(--radius);
+  color: var(--ink);
+}
+#work-panel .row > div { color: var(--ink-secondary); }
+#work-panel .row:hover { border-color: var(--ink-secondary); }
+#work-panel .row.selected {
+  border-color: var(--action);
+  background: rgba(38, 92, 216, 0.08);
+  color: var(--ink);
 }
 textarea {
   font: inherit;
-  color: var(--text-primary);
-  background: var(--surface-inset);
-  border: 1px solid var(--border-fine);
+  color: var(--ink);
+  background: #ffffff;
+  border: 1px solid #DCE3EB;
   border-radius: var(--radius);
   padding: var(--space-2) var(--space-3);
   min-height: 6rem;
   resize: vertical;
+  width: 100%;
+  max-width: 72ch;
 }
+button {
+  font: inherit;
+  font-size: var(--type-xs);
+  color: var(--question-surface);
+  background: var(--rail);
+  border: 1px solid var(--rail);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-3);
+  min-height: 44px;
+  cursor: pointer;
+}
+/* Sentence-case action labels; the single primary action uses --action blue. */
+button[type="submit"], #question-detail button[type="button"] {
+  background: var(--action);
+  border-color: var(--action);
+  color: var(--question-surface);
+  font-weight: 600;
+}
+button:disabled { opacity: 0.55; cursor: default; }
+:focus-visible { outline: 3px solid var(--action); outline-offset: 2px; }
 #retry-reads { margin: var(--space-2) 0; }
-@media (max-width: 600px) {
-  body {
-    padding: var(--space-2);
-  }
-  #inbox {
+/* Narrow screens to 390 px: the rail stacks above the pale workspace and
+   touch targets grow; the pale surface keeps its readable measure. */
+@media (max-width: 700px) {
+  #desk {
     grid-template-columns: minmax(0, 1fr);
   }
-  .row, button, #question-detail textarea { min-height: 44px; }
   #session-rail, #work-panel { min-height: 0; }
+  .row, button, #question-detail textarea { min-height: 44px; }
 }
 </style>
 </head>
 <body>
-<h1>Agentspace</h1>
+<header id="desk-head">
+  <h1>Agentspace</h1>
+  <span class="desk-tag">questions desk</span>
+</header>
 <form id="signin">
   <label for="token">Local token</label>
+
   <input id="token" type="password" autocomplete="off" required>
   <button type="submit">Connect</button>
 </form>
 <div id="status" role="status"></div>
-<section id="inbox" hidden>
+<section id="desk" hidden>
   <nav id="session-rail" aria-label="Sessions">
     <h2>Sessions</h2>
     <button id="reload-sessions" type="button">Reload sessions</button>
@@ -396,11 +430,13 @@ const PAGE_JS = `'use strict';
     // The entrance animation is keyed to this render via the class; with
     // prefers-reduced-motion the class animates nothing and the same lines
     // appear instantly — no state depends on the animation finishing.
+    // The exact wording of every line is unchanged; only emphasis classes
+    // (display-type question text, monospaced identifiers) are new.
     detail.className = 'entering';
-    line(detail, 'question: ' + question.questionId);
+    line(detail, 'text: ' + question.text).className = 'question-text';
+    line(detail, 'question: ' + question.questionId, 'identity');
     line(detail, 'session: ' + question.sessionId);
-    line(detail, 'revision: ' + question.revision);
-    line(detail, 'text: ' + question.text);
+    line(detail, 'revision: ' + question.revision, 'identity');
     replyComposer(detail, question);
   }
 
@@ -624,7 +660,7 @@ const PAGE_JS = `'use strict';
   function connect(event) {
     event.preventDefault();
     token = el('token').value;
-    el('inbox').hidden = false;
+    el('desk').hidden = false;
     el('reload-sessions').addEventListener('click', function () { loadSessions(); });
     el('retry-reads').addEventListener('click', function () { retryReads(); });
     loadSessions();
