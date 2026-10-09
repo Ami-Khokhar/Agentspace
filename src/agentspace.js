@@ -103,7 +103,7 @@ function createAgentSpace() {
       sessionId: session.id,
       revision: session.lastRevision,
       text,
-      status: 'open', // open | answered | stale
+      status: 'open', // open | answered | stale | expired
     };
     session.questions.set(question.id, question);
     session.activeQuestionId = question.id;
@@ -152,6 +152,36 @@ function createAgentSpace() {
       receiptId: question.receipt.id,
       receiptStatus: question.receipt.status,
     };
+  }
+
+  /**
+   * Expire the active open question of a session explicitly. A question that
+   * expires — for example while its client was disconnected — stays expired:
+   * it leaves the pending list, is never resurrected, and any reply replayed
+   * at its former coordinates is rejected before any state changes.
+   */
+  function expireQuestion({ sessionId, questionId, revision }) {
+    if (!Number.isInteger(revision)) {
+      fail(ERRORS.revisionMismatch, `revision must be an integer, got ${revision}`);
+    }
+    const session = getSession(sessionId);
+    // A closed session stays closed: expiry on a terminal session must not
+    // resurrect it into a live one, so this check runs before any state change.
+    assertOpen(session);
+    if (!questionId || !session.questions.has(questionId)) {
+      fail(ERRORS.unknownQuestion, `session ${session.id} has no question ${questionId}`);
+    }
+    const question = session.questions.get(questionId);
+    if (question.status !== 'open' || session.activeQuestionId !== questionId) {
+      fail(ERRORS.questionNotOpen, `question ${questionId} is ${question.status === 'open' ? 'not the active question' : question.status}`);
+    }
+    if (question.revision !== revision) {
+      fail(ERRORS.revisionMismatch, `question ${questionId} is at revision ${question.revision}, expiry targeted ${revision}`);
+    }
+    question.status = 'expired';
+    session.activeQuestionId = null;
+    session.status = 'working';
+    return { sessionId: session.id, questionId: question.id, revision: question.revision, status: question.status };
   }
 
   /**
@@ -251,7 +281,7 @@ function createAgentSpace() {
     return out;
   }
 
-  return { createSession, ask, reply, acknowledge, sendEvent, getSessionState, listSessions, listPendingQuestions };
+  return { createSession, ask, reply, acknowledge, expireQuestion, sendEvent, getSessionState, listSessions, listPendingQuestions };
 }
 
 module.exports = { createAgentSpace, AgentSpaceError, ERRORS, STATE_EVENT_TYPES, TERMINAL_STATES };

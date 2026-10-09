@@ -110,8 +110,69 @@ async function finishSimulatedSession(client, sessionId) {
   return sent.body;
 }
 
+/**
+ * Simulated reconnect after an accepted reply: disconnect, reconnect and
+ * replay. Step 1 replays the exact reply coordinates the simulator sent
+ * before disconnecting; the service must reject that duplicate
+ * (`questionNotOpen`) without producing a second receipt, so the replay can
+ * never re-consume an already-answered question. Step 2 re-acknowledges the
+ * saved receipt with its exact identity after reconnecting; an exact
+ * match is idempotent-equivalent (same state, same receipt), so a reconnect
+ * after acknowledgement cannot regress the receipt back to unacknowledged
+ * or mint a new one. Fails loudly on anything else.
+ */
+async function reconnectSimulatedSession({ client, sessionId, answered, onLine }) {
+  const step = (line) => onLine && onLine(`${SIMULATED_LABEL} ${line}`);
+  step(`reconnect ${sessionId} (simulated; replaying what was sent before the disconnect)`);
+  let replayed = 0;
+  for (const entry of answered) {
+    const replay = await client.post(
+      `/sessions/${sessionId}/questions/${entry.questionId}/reply`,
+      { revision: entry.revision, text: entry.reply }
+    );
+    if (replay.status !== 409 || replay.body.error !== 'questionNotOpen') {
+      fail(`duplicate replay was not rejected safely: ${replay.status}`);
+    }
+    step(`duplicate replay rejected safely (${replay.body.error}); no second receipt exists`);
+
+    const ack = await client.post(
+      `/sessions/${sessionId}/questions/${entry.questionId}/acknowledge`,
+      { revision: entry.revision, receiptId: entry.receipt }
+    );
+    if (ack.status !== 200 || ack.body.receiptStatus !== 'acknowledged') {
+      fail(`re-acknowledge after reconnect failed: ${ack.status}`);
+    }
+    step(`receipt ${entry.receipt} still acknowledged after reconnect (one logical reply, one receipt, at most one consumption)`);
+    replayed += 1;
+  }
+  return { replayed, duplicateRepliesRejected: replayed, receiptsStillAcknowledged: replayed };
+}
+
+/**
+ * Simulated reconnect after expiry: while the session was disconnected a new
+ * question was asked, disconnected again, and expired explicitly with its
+ * exact revision. On reconnect a stale answer at the expired question's
+ * coordinates must be rejected (`questionNotOpen`) and the pending list must
+ * be empty: the question is not resurrected and the stale answer is never
+ * accepted. Fails loudly on anything else.
+ */
+async function reconnectExpiredSimulatedSession(client, sessionId, expiredQuestionId, expiredRevision) {
+  const stale = await client.post(
+    `/sessions/${sessionId}/questions/${expiredQuestionId}/reply`,
+    { revision: expiredRevision, text: 'Simulated answer for an expired question.' }
+  );
+  if (stale.status !== 409 || stale.body.error !== 'questionNotOpen') {
+    fail(`stale answer to an expired question was accepted: ${stale.status}`);
+  }
+  const pending = await client.get(`/sessions/${sessionId}/questions/pending`);
+  if (pending.status !== 200 || pending.body.questions.length !== 0) {
+    fail(`expired question was resurrected in the pending list: ${JSON.stringify(pending.body)}`);
+  }
+  return { staleReplyRejected: true, pendingCount: pending.body.questions.length };
+}
+
 function fail(message) {
   throw new Error(`agentspace simulator: ${message}`);
 }
 
-module.exports = { SIMULATED_LABEL, createHttpClient, runSimulatedSession, finishSimulatedSession };
+module.exports = { SIMULATED_LABEL, createHttpClient, runSimulatedSession, finishSimulatedSession, reconnectSimulatedSession, reconnectExpiredSimulatedSession };

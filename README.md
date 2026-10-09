@@ -23,6 +23,14 @@ questions with explicit reply routing. Dependency-free Node.js core.
   'acknowledged'. Closed sessions (`finished`/`disconnected`) reject
   acknowledgements, so disconnection never implies delivery; receipt states
   stay readable in `getSessionState`.
+- `expireQuestion({ sessionId, questionId, revision })` →
+  `{ ..., status: 'expired' }`. Expires the active open question explicitly
+  (for example while its client was disconnected). An expired question stays
+  expired: it leaves the pending list, is never resurrected, and any answer
+  replayed at its former coordinates (or against a newer revision) is
+  rejected before any state changes. On a terminal session (`finished` or
+  `disconnected`) expiry is rejected with `sessionClosed` — a closed session
+  stays closed, so expiry cannot resurrect it into a live one.
 - `sendEvent(sessionId, { type })` — explicit state events only: `working`,
   `needs-user`, `finished`, `disconnected`. `finished`/`disconnected` close the
   session to further asks and replies. Unknown or malformed events are rejected
@@ -44,8 +52,8 @@ Executed evidence (Node v24.21.0, npm 11.19.0):
 
 ```
 $ npm test
-ℹ tests 47
-ℹ pass 47
+ℹ tests 50
+ℹ pass 50
 ℹ fail 0
 ```
 
@@ -89,7 +97,25 @@ of two simulated sessions against the real service and core boundaries:
   owning simulator then acknowledges (exactly matching session,
   question/revision/receipt id) through the service's acknowledgement route,
   so the demo distinguishes accepted, unacknowledged and acknowledged
-  states. No reconnect or replay mechanism exists.
+  states.
+- Simulated reconnect/replay safety: after each accepted reply, each session's
+  own simulator replays the disconnect path once — it re-posts the same reply
+  coordinates and re-acknowledges the same receipt identity. The service
+  rejects the duplicate reply with `409 questionNotOpen` (one logical reply,
+  one receipt, at most one consumption) and treats the duplicate
+  acknowledgement as the same, already-acknowledged receipt (no new receipt,
+  no regression to unacknowledged). Simulator functions
+  `reconnectSimulatedSession` and `reconnectExpiredSimulatedSession` do the
+  same across a full disconnect: replay is rejected both before and after a
+  reconnect, and a question expired during the disconnect (`expireQuestion`)
+  stays expired — no resurrection in the pending list, no stale answer at the
+  old coordinates, none at a newer revision either.
+- Simulator limitations: everything is scripted and local — no real agent,
+  network, storage, clock or queueing exists. Reconnection is modelled as a
+  plain HTTP redial inside one running process: the session-level
+  `disconnected` event is terminal, so a simulated session that sends it
+  cannot reconnect at all. Expiry is an explicit local call, not a timer, and
+  acknowledged receipts are never re-acknowledged into a different state.
 - Each session is closed with an explicit `finished` event through the
   events route; the service is then closed and the demo exits. All local,
   loopback only, no network, no credentials, no command execution.
