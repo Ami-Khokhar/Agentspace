@@ -58,6 +58,10 @@ const PAGE_HTML = `<!doctype html>
   --type-base: 0.95rem;
   --type-md: 1.05rem;
   --type-lg: 1.2rem;
+  /* Restrained motion only: every transition is under 200ms and touches no
+     layout property, so reading targets never shift while an animation runs. */
+  --motion-fast: 120ms;
+  --motion-panel: 160ms;
 }
 * { box-sizing: border-box; }
 /* Author rules like #inbox { display: grid } would otherwise beat the UA
@@ -135,6 +139,31 @@ button[type="submit"], #question-detail button[type="button"] {
 }
 button:disabled { opacity: 0.55; cursor: default; }
 :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.row {
+  transition: border-color var(--motion-fast) ease-out, background-color var(--motion-fast) ease-out;
+}
+/* Selection colours change instantly only where reduced motion removes the
+   transition; the colors themselves never depend on animation. */
+.row:focus-visible { border-color: var(--accent); }
+/* Subtle panel entrance tied to the current selection: content is already
+   correct before the animation starts, it only fades/slides in from a small
+   offset — never from, or through, another session's content. */
+.entering {
+  animation: panel-enter var(--motion-panel) ease-out;
+}
+@keyframes panel-enter {
+  from { opacity: 0.4; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+/* Honest feedback states on the reply status line, distinct in text (the
+   wording stays exact) and additionally signalled with colour. */
+.reply-status.pending { color: var(--warn); }
+.reply-status.accepted { color: var(--ok); }
+.reply-status.refused { color: var(--warn); }
+@media (prefers-reduced-motion: reduce) {
+  .row { transition: none; }
+  .entering { animation: none; }
+}
 #session-rail { display: flex; flex-direction: column; min-width: 0; }
 #session-list { display: flex; flex-direction: column; gap: 2px; }
 .row {
@@ -364,6 +393,10 @@ const PAGE_JS = `'use strict';
     selectedQuestion = question;
     var detail = el('question-detail');
     detail.textContent = '';
+    // The entrance animation is keyed to this render via the class; with
+    // prefers-reduced-motion the class animates nothing and the same lines
+    // appear instantly — no state depends on the animation finishing.
+    detail.className = 'entering';
     line(detail, 'question: ' + question.questionId);
     line(detail, 'session: ' + question.sessionId);
     line(detail, 'revision: ' + question.revision);
@@ -393,6 +426,7 @@ const PAGE_JS = `'use strict';
     sendButton.textContent = 'Send reply';
     var statusLine = document.createElement('div');
     statusLine.setAttribute('role', 'status');
+    statusLine.className = 'reply-status';
     detail.appendChild(sendButton);
     detail.appendChild(statusLine);
     if (question.stale) {
@@ -462,6 +496,7 @@ const PAGE_JS = `'use strict';
     var url = '/sessions/' + encodeURIComponent(question.sessionId) +
       '/questions/' + encodeURIComponent(question.questionId) + '/reply';
     statusLine.textContent = 'sending reply…';
+    statusLine.className = 'reply-status pending';
     fetch(url, {
       method: 'POST',
       headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' },
@@ -472,6 +507,7 @@ const PAGE_JS = `'use strict';
         // acknowledgement: no agent receives input in this build.
         if (response.status !== 202) throw new Error('status-' + response.status);
         statusLine.textContent = 'reply accepted for routing; no agent has received it yet';
+        statusLine.className = 'reply-status accepted';
         settle();
       })
       .catch(function (err) {
@@ -482,14 +518,17 @@ const PAGE_JS = `'use strict';
           question.stale = true;
           blocked = true;
           statusLine.textContent = 'reply not accepted: the question is no longer current (revision ' + revision + ' was refused). The draft is kept for this exact question. Reload the pending questions (select the session again), then select the refreshed question';
+          statusLine.className = 'reply-status refused';
           sendButton.disabled = true;
           settle();
           return;
         }
         if (err.message && err.message.indexOf('status-') === 0) {
           statusLine.textContent = 'reply not accepted (' + err.message + ')';
+          statusLine.className = 'reply-status refused';
         } else {
           statusLine.textContent = 'network error: the reply was not sent (' + err.message + ')';
+          statusLine.className = 'reply-status refused';
         }
       })
       .then(function () {

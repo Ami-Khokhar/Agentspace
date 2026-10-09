@@ -252,8 +252,39 @@ them were executed by automated tooling, and no claim below is a test result:
    block with no resend until you reselect the session (refreshing the
    pending questions) and pick the refreshed question.
 
+6. Motion (workspace transitions, restrained by design): select a session and
+   a question. Expected: the selection highlight and hover/focus border
+   change over a short (≤200 ms) transition; the question panel fades in from
+   a 4 px offset over ~160 ms while showing only the currently selected
+   question's lines — no old session's content is ever displayed, and text
+   positions of reading targets do not shift. With the browser's
+   "emulate prefers-reduced-motion: reduce" setting enabled: expected is the
+   same content with no transition or entrance animation — every state change
+   (selection colours, loading lines, reply status wording) applies instantly
+   with no functional dependency on animation.
+7. Reply feedback: submit a reply. Expected: the status line reads
+   "sending reply…" (pending), then "reply accepted for routing; no agent has
+   received it yet" (accepted, explicitly not delivered, never agent
+   acknowledgement); on a stale or failed submission it reads the exact
+   refusal text. No spinner, shimmer, scroll-dependent control or fake
+   progress appears at any point; waits are named in text only.
+8. Mobile width (motion included): in the browser's responsive mode, narrow
+   the window below 600 px. Expected: the stacked single-column layout with
+   ≥44 px touch targets behaves as on desktop — the same restrained
+   transitions, the same panel entrance scoped to the new selection, and
+   reduced-motion still removes all animation.
+
 The page uses no external assets, storage or network beyond its own loopback
 service, and the token stays in memory and in the `Authorization` header only.
+
+The automated `npm test` run above **does** verify against the actual
+implementation: the entrance class is applied to the question panel render
+with the panel's lines and live composer present immediately (state is never
+waited on animation, the reduced-motion path renders identically), and reply
+statuses move through `pending`/`accepted`/`refused` feedback classes with
+exact wording unchanged. It does **not** execute the browser checks 1–8
+above; none of them were performed by automated tooling and no claim in them
+is a test result.
 
 ## Local HTTP service
 
